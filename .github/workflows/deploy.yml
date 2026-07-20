@@ -51,3 +51,23 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Sync Pages
+        run: |
+          max_retries=60
+          retry_delay=60
+          for i in $(seq 1 $max_retries); do
+            if curl -sf -X POST https://ltpp.vip/api/github/pages/sync/eastspire/kimi-mc \
+              -H "Connection: close"; then
+              echo ""
+              echo "Sync succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i of $max_retries failed"
+            if [ $i -lt $max_retries ]; then
+              echo "Retrying in ${retry_delay}s..."
+              sleep $retry_delay
+            fi
+          done
+          echo "All $max_retries attempts failed"
+          exit 1

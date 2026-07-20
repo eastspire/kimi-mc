@@ -377,7 +377,12 @@ export class MobManager {
         return;
       }
       const passive = daylight > 0.55;
-      const PASSIVES: MobKind[] = ['pig', 'sheep', 'cow', 'chicken'];
+      // 被动池：村民低权重（MC 村庄较稀），四足生物为主
+      const PASSIVES: MobKind[] = [
+        'pig', 'sheep', 'cow', 'chicken',
+        'pig', 'sheep', 'cow', 'chicken',
+        'villager',
+      ];
       // 夜晚敌对池：末影人权重较低（MC 较稀有）
       const HOSTILES: MobKind[] = [
         'zombie', 'skeleton', 'creeper', 'spider',

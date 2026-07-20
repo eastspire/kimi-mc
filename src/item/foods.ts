@@ -178,3 +178,8 @@ export const FOODS = {
 } as const;
 
 export type FoodId = keyof typeof FOODS;
+
+/** 按 id 查食物定义（找不到返回 null） */
+export function foodById(id: string): FoodDef | null {
+  return (FOODS as Record<string, FoodDef>)[id] ?? null;
+}

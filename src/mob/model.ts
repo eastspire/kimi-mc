@@ -391,6 +391,35 @@ function paintGhast(ctx: CanvasRenderingContext2D): void {
   f(27, 28, 1, 2, '#5a5a5a');
 }
 
+/** 村民：棕长袍 + 光头大鼻子（人形盒 + 独立鼻盒） */
+function paintVillager(ctx: CanvasRenderingContext2D): void {
+  const f = (x: number, y: number, w: number, h: number, c: string): void => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const skin = '#c89a6a';
+  const robe = '#8a6a4a';
+  const robeDark = '#6e5238';
+  // 头部：皮肤色（光头）
+  f(0, 0, 32, 16, skin);
+  // 浓眉 + 绿眼（头正面 (8,8)-(16,16)）
+  f(9, 10, 3, 1, '#4a3a28');
+  f(13, 10, 3, 1, '#4a3a28');
+  f(10, 12, 1, 1, '#3a6a3a');
+  f(14, 12, 1, 1, '#3a6a3a');
+  // 鼻子（鼻盒 UV 区 (24,0) 起，统一肤色略深）
+  f(24, 0, 8, 8, '#b8885a');
+  // 躯干/四肢：长袍
+  f(16, 16, 24, 16, robe);
+  f(40, 16, 16, 16, robe); // 臂（交叠藏袍内，简化同色）
+  f(0, 16, 16, 16, robe);  // 腿
+  // 袍边 + 腰带
+  for (let i = 0; i < 16; i++) {
+    f(16 + i, 20, 1, 1, robeDark); // 胸带
+    f(i, 28, 1, 1, robeDark);      // 袍摆
+  }
+}
+
 // ------------------------------------------------------------
 // 模型装配（几何/材质缓存，跨个体共享）
 // ------------------------------------------------------------
@@ -429,6 +458,7 @@ let spiderAssets: MobAssets | null = null;
 let endermanAssets: MobAssets | null = null;
 let zombiePiglinAssets: MobAssets | null = null;
 let ghastAssets: MobAssets | null = null;
+let villagerAssets: MobAssets | null = null;
 
 function makeAssets(paint: (ctx: CanvasRenderingContext2D) => void, geo: MobAssets['geo']): MobAssets {
   const tex = makeTexture(paint);
@@ -568,6 +598,20 @@ function getGhastAssets(): MobAssets {
     });
   }
   return ghastAssets;
+}
+
+function getVillagerAssets(): MobAssets {
+  if (!villagerAssets) {
+    // 人形 + 独立大鼻盒（鼻 UV 区 (24,0)）
+    villagerAssets = makeAssets(paintVillager, {
+      body: mcBox(8, 12, 4, 16, 16),
+      head: mcBox(8, 8, 8, 0, 0),
+      nose: mcBox(2, 4, 2, 24, 0),
+      arm: mcBox(4, 12, 4, 40, 16),
+      leg: mcBox(4, 12, 4, 0, 16),
+    });
+  }
+  return villagerAssets;
 }
 
 export function buildPigModel(): MobModel {
@@ -1033,6 +1077,56 @@ export function buildGhastModel(): MobModel {
   return { group, head, legs, arms: [], meshes, material: a.material, hurtMaterial: a.hurt };
 }
 
+/** 村民模型：人形 + 大鼻子，手臂交叠藏袍内（armBase 0，简化下垂） */
+export function buildVillagerModel(): MobModel {
+  const a = getVillagerAssets();
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+  const add = (m: THREE.Mesh): THREE.Mesh => {
+    meshes.push(m);
+    return m;
+  };
+
+  const body = add(new THREE.Mesh(a.geo.body, a.material));
+  body.position.y = 18 * PX;
+  group.add(body);
+
+  const head = new THREE.Group();
+  head.position.set(0, 24 * PX, 0);
+  const headMesh = add(new THREE.Mesh(a.geo.head, a.material));
+  headMesh.position.y = 4 * PX;
+  // 大鼻子：头正面（-z）下方凸出
+  const nose = add(new THREE.Mesh(a.geo.nose, a.material));
+  nose.position.set(0, 1 * PX, -5 * PX);
+  head.add(headMesh, nose);
+  group.add(head);
+
+  // 手臂交叠身前（MC 村民经典姿态：两臂合并前垂）
+  const arms: THREE.Group[] = [];
+  for (const ax of [-2, 2]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(ax * PX, 20 * PX, -3 * PX);
+    pivot.rotation.x = 0.4; // 略前倾
+    const mesh = add(new THREE.Mesh(a.geo.arm, a.material));
+    mesh.position.y = -4 * PX;
+    pivot.add(mesh);
+    group.add(pivot);
+    arms.push(pivot);
+  }
+
+  const legs: THREE.Group[] = [];
+  for (const lx of [-2, 2]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(lx * PX, 12 * PX, 0);
+    const mesh = add(new THREE.Mesh(a.geo.leg, a.material));
+    mesh.position.y = -6 * PX;
+    pivot.add(mesh);
+    group.add(pivot);
+    legs.push(pivot);
+  }
+  return { group, head, legs, arms, armBase: 0.4, meshes, material: a.material, hurtMaterial: a.hurt };
+}
+
 /** 昼夜亮度同步到生物材质（与天空 daylight 一致，主循环每帧调用） */
 export function setMobBrightness(d: number): void {
   if (pigAssets) pigAssets.material.color.setScalar(d);
@@ -1046,4 +1140,5 @@ export function setMobBrightness(d: number): void {
   if (endermanAssets) endermanAssets.material.color.setScalar(d);
   if (zombiePiglinAssets) zombiePiglinAssets.material.color.setScalar(d);
   if (ghastAssets) ghastAssets.material.color.setScalar(d);
+  if (villagerAssets) villagerAssets.material.color.setScalar(d);
 }

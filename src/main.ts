@@ -3,8 +3,17 @@ import './style.css';
 import { createAtlas, TILE_INDEX, type AtlasResult } from './core/atlas';
 import { loadBlocks, type BlockDef } from './core/model-loader';
 import { BlockRegistry, AIR } from './core/block-registry';
-import { Persistence, type LoadedSave, type GameMode } from './core/persistence';
-import { WorldGen, SEA_LEVEL, parseSeedInput, type Dimension } from './world/worldgen';
+import {
+  Persistence,
+  type LoadedSave,
+  type GameMode,
+} from './core/persistence';
+import {
+  WorldGen,
+  SEA_LEVEL,
+  parseSeedInput,
+  type Dimension,
+} from './world/worldgen';
 import { World, chunkKey } from './world/world';
 import { ChunkManager, RENDER_DIST } from './render/chunk-manager';
 import { Sky, DAY_LENGTH } from './render/sky';
@@ -44,6 +53,7 @@ import { XpManager } from './item/xp';
 import { FOODS } from './item/foods';
 import type { HotSlot } from './ui/hotbar';
 import { EnchantUI } from './ui/enchant-ui';
+import { TradingUI } from './ui/trading-ui';
 import { armorById, armorReduction } from './item/armor';
 import {
   efficiencyMult,
@@ -232,7 +242,8 @@ function startGame(
     );
   }
   // 当前维度（读档恢复；缺省主世界）
-  let dimension: Dimension = save?.meta.dimension === 'nether' ? 'nether' : 'overworld';
+  let dimension: Dimension =
+    save?.meta.dimension === 'nether' ? 'nether' : 'overworld';
   /** 当前维度上下文（世界/区块管理器/修改集随维度切换） */
   const cur = (): DimCtx => dims[dimension];
   const worldGen = dims.overworld.gen; // 出生点用主世界生成器
@@ -316,7 +327,8 @@ function startGame(
       if (kind === 'zombie_piglin') {
         // 僵尸猪灵掉 0~1 腐肉 + 0~1 金粒（权宜用金锭）+ 5 经验（MC）
         const nr = Math.floor(Math.random() * 2);
-        for (let i = 0; i < nr; i++) drops.spawnFood(FOODS.rotten_flesh, x, y, z);
+        for (let i = 0; i < nr; i++)
+          drops.spawnFood(FOODS.rotten_flesh, x, y, z);
         if (Math.random() < 0.5) drops.spawnTool(TOOLS.gold_ingot, x, y, z);
         if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
         return;
@@ -326,6 +338,11 @@ function startGame(
         const ng = Math.floor(Math.random() * 3);
         for (let i = 0; i < ng; i++) drops.spawnTool(TOOLS.gunpowder, x, y, z);
         if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
+        return;
+      }
+      if (kind === 'villager') {
+        // 村民死亡不掉落（MC 一致），仅 1~3 经验
+        if (gameMode === 'survival') xpManager.spawn(xp(), x, y, z);
         return;
       }
       const n =
@@ -377,7 +394,12 @@ function startGame(
   let spawnPoint = { ...spawnPos };
   {
     const sp = save?.meta.spawnPoint;
-    if (sp && Number.isFinite(sp.x) && Number.isFinite(sp.y) && Number.isFinite(sp.z))
+    if (
+      sp &&
+      Number.isFinite(sp.x) &&
+      Number.isFinite(sp.y) &&
+      Number.isFinite(sp.z)
+    )
       spawnPoint = { x: sp.x, y: sp.y, z: sp.z };
   }
   let hp = 20;
@@ -484,7 +506,10 @@ function startGame(
       if (ad) pts += ad.armor;
       if (s.ench?.protection) prot += s.ench.protection;
     }
-    const reduction = Math.min(0.8, armorReduction(pts) + protectionBonus(prot));
+    const reduction = Math.min(
+      0.8,
+      armorReduction(pts) + protectionBonus(prot),
+    );
     return { reduction, points: pts };
   };
   /** 受伤时随机损耗一件已穿盔甲 1 点耐久（含耐久附魔减免） */
@@ -502,8 +527,7 @@ function startGame(
   };
   /** 把槽位内容掉落在指定位置（背包退不下/熔炉破坏散出共用） */
   const dropSlotAt = (slot: HotSlot, x: number, y: number, z: number): void => {
-    if (slot.block)
-      drops.spawnBlock(slot.block.def, x, y, z, slot.block.count);
+    if (slot.block) drops.spawnBlock(slot.block.def, x, y, z, slot.block.count);
     else if (slot.food)
       drops.spawnFood(slot.food.def, x, y, z, slot.food.count);
     else if (slot.tool)
@@ -511,7 +535,8 @@ function startGame(
   };
   const invCallbacks = {
     onClose: () => controls.lock(),
-    onDropSlot: (slot: HotSlot) => dropSlotAt(slot, body.x, body.y + 0.5, body.z),
+    onDropSlot: (slot: HotSlot) =>
+      dropSlotAt(slot, body.x, body.y + 0.5, body.z),
   };
   const survivalInv = new SurvivalInventory(
     registry,
@@ -549,7 +574,9 @@ function startGame(
     }
     if (out.kind === 'food') {
       const fd = FOODS[out.id as keyof typeof FOODS];
-      return fd ? { block: null, food: { def: fd, count: 1 }, tool: null } : null;
+      return fd
+        ? { block: null, food: { def: fd, count: 1 }, tool: null }
+        : null;
     }
     const td = TOOLS[out.id];
     return td ? { block: null, food: null, tool: { def: td, count: 1 } } : null;
@@ -567,13 +594,36 @@ function startGame(
       sfx.playXp();
     },
   });
+
+  // ---- 村民交易：右键村民打开 UI，材料换产物（共享主栏/快捷栏） ----
+  const tradingUI = new TradingUI(registry, atlas.canvas, hotbar, invMain, {
+    ...invCallbacks,
+    onTrade: () => {
+      sfx.playPickup();
+    },
+  });
   // 读档：恢复熔炉状态
   if (save?.meta.furnaces) {
     for (const sf of save.meta.furnaces) {
       const st = newFurnace(sf.p[0], sf.p[1], sf.p[2]);
-      st.input = resolveSlot(sf.i, (id) => registry.def(id), (fid) => FOODS[fid as keyof typeof FOODS] ?? null, (tid) => TOOLS[tid] ?? null);
-      st.fuel = resolveSlot(sf.f, (id) => registry.def(id), (fid) => FOODS[fid as keyof typeof FOODS] ?? null, (tid) => TOOLS[tid] ?? null);
-      st.output = resolveSlot(sf.o, (id) => registry.def(id), (fid) => FOODS[fid as keyof typeof FOODS] ?? null, (tid) => TOOLS[tid] ?? null);
+      st.input = resolveSlot(
+        sf.i,
+        (id) => registry.def(id),
+        (fid) => FOODS[fid as keyof typeof FOODS] ?? null,
+        (tid) => TOOLS[tid] ?? null,
+      );
+      st.fuel = resolveSlot(
+        sf.f,
+        (id) => registry.def(id),
+        (fid) => FOODS[fid as keyof typeof FOODS] ?? null,
+        (tid) => TOOLS[tid] ?? null,
+      );
+      st.output = resolveSlot(
+        sf.o,
+        (id) => registry.def(id),
+        (fid) => FOODS[fid as keyof typeof FOODS] ?? null,
+        (tid) => TOOLS[tid] ?? null,
+      );
       st.burn = sf.burn;
       st.burnMax = sf.burnMax || 1;
       st.cook = sf.cook;
@@ -675,7 +725,12 @@ function startGame(
       if (state !== 'playing' || !controls.locked) return;
       if (gameMode === 'creative') {
         if (!inventory.isOpen) inventory.open();
-      } else if (!survivalInv.isOpen && !craftingTable.isOpen && !furnaceUI.isOpen) {
+      } else if (
+        !survivalInv.isOpen &&
+        !craftingTable.isOpen &&
+        !furnaceUI.isOpen &&
+        !tradingUI.isOpen
+      ) {
         survivalInv.open();
       }
     },
@@ -694,6 +749,7 @@ function startGame(
         !survivalInv.isOpen &&
         !craftingTable.isOpen &&
         !furnaceUI.isOpen &&
+        !tradingUI.isOpen &&
         !dead,
     );
   };
@@ -881,7 +937,8 @@ function startGame(
    * 若目标点附近无传送门则在落脚处自动建一座（MC 行为）。
    */
   const travelThroughPortal = (): void => {
-    const target: Dimension = dimension === 'overworld' ? 'nether' : 'overworld';
+    const target: Dimension =
+      dimension === 'overworld' ? 'nether' : 'overworld';
     // 主世界→下界 ÷8；下界→主世界 ×8
     const nx =
       target === 'nether' ? body.x / NETHER_SCALE : body.x * NETHER_SCALE;
@@ -1097,8 +1154,10 @@ function startGame(
           dayTime: sky.timeValue,
           mode: gameMode,
           hotbar: gameMode === 'survival' ? hotbar.serialize() : undefined,
-          inv: gameMode === 'survival' ? survivalInv.serializeMain() : undefined,
-          armor: gameMode === 'survival' ? survivalInv.serializeArmor() : undefined,
+          inv:
+            gameMode === 'survival' ? survivalInv.serializeMain() : undefined,
+          armor:
+            gameMode === 'survival' ? survivalInv.serializeArmor() : undefined,
           furnaces: [...furnaces.values()].map(serializeFurnace),
           spawnPoint: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
           dimension,
@@ -1183,7 +1242,13 @@ function startGame(
    *  - 玩家伤害 = power*5 中心线性衰减至 power*2+1 格；击退方向从爆心指向玩家
    *  - 灰烟粒子 + 爆炸音效；破坏经 applyEdit 自动入存档修改集
    */
-  function explode(x: number, y: number, z: number, power = 3, dropChance = 0.3): void {
+  function explode(
+    x: number,
+    y: number,
+    z: number,
+    power = 3,
+    dropChance = 0.3,
+  ): void {
     const R = power;
     const cx = Math.floor(x);
     const cy = Math.floor(y);
@@ -1202,7 +1267,12 @@ function startGame(
           if (!def || def.hardness < 0) continue; // 基岩/水免疫
           applyEdit(bx, by, bz, AIR);
           if (def.name === 'tnt') {
-            tntManager.ignite(bx + 0.5, by + 0.5, bz + 0.5, 0.5 + Math.random());
+            tntManager.ignite(
+              bx + 0.5,
+              by + 0.5,
+              bz + 0.5,
+              0.5 + Math.random(),
+            );
             continue; // 连锁引爆，不掉落方块实体
           }
           if (Math.random() < dropChance) {
@@ -1312,10 +1382,8 @@ function startGame(
 
   /** 破坏掉落表：草方块→泥土、石头→圆石（MC），玻璃/树叶→无，其余→自身 */
   function dropFor(def: BlockDef): BlockDef | null {
-    if (def.name === 'grass_block')
-      return registry.byName.get('dirt') ?? def;
-    if (def.name === 'stone')
-      return registry.byName.get('cobblestone') ?? def;
+    if (def.name === 'grass_block') return registry.byName.get('dirt') ?? def;
+    if (def.name === 'stone') return registry.byName.get('cobblestone') ?? def;
     if (def.name === 'glass' || def.name === 'oak_leaves') return null;
     return def;
   }
@@ -1353,7 +1421,8 @@ function startGame(
       // 时运附魔：提升矿物掉落数量（煤/钻/青金石/红石/绿宝石）
       const fortuneLvl = hotbar.current.tool?.ench?.fortune ?? 0;
       const fmult = fortuneMult(fortuneLvl);
-      const lucky = (base: number): number => Math.max(1, Math.round(base * fmult));
+      const lucky = (base: number): number =>
+        Math.max(1, Math.round(base * fmult));
       if (canHarvest(def.name, heldTool)) {
         // 煤矿掉煤、钻石矿掉钻石（MC 一致），其余走方块掉落表
         if (def.name === 'coal_ore') {
@@ -1363,7 +1432,13 @@ function startGame(
         } else if (def.name === 'lapis_ore') {
           // 青金石掉 4~8 个
           const n = 4 + Math.floor(Math.random() * 5);
-          drops.spawnTool(TOOLS.lapis_lazuli, x + 0.5, y + 0.5, z + 0.5, lucky(n));
+          drops.spawnTool(
+            TOOLS.lapis_lazuli,
+            x + 0.5,
+            y + 0.5,
+            z + 0.5,
+            lucky(n),
+          );
         } else if (def.name === 'redstone_ore') {
           const n = 4 + Math.floor(Math.random() * 2);
           drops.spawnTool(TOOLS.redstone, x + 0.5, y + 0.5, z + 0.5, lucky(n));
@@ -1492,8 +1567,12 @@ function startGame(
 
     // 末影人注视激怒（MC）：准星远距离锁定其头部约 0.25s 即激怒
     const stareHit = mobManager.raycastMob(
-      eye.x, eye.y, eye.z,
-      tmpDir.x, tmpDir.y, tmpDir.z,
+      eye.x,
+      eye.y,
+      eye.z,
+      tmpDir.x,
+      tmpDir.y,
+      tmpDir.z,
       32,
     );
     if (stareHit && stareHit.mob.kind === 'enderman' && !stareHit.mob.dying) {
@@ -1543,7 +1622,8 @@ function startGame(
           // 工具加成：对应工具类型才有速度倍率（MC：木 2×、石 4×）；效率附魔再加速
           const heldTool = hotbar.current.tool?.def ?? null;
           const effLvl = hotbar.current.tool?.ench?.efficiency ?? 0;
-          const base = gameMode === 'survival' ? miningSpeed(def.name, heldTool) : 1;
+          const base =
+            gameMode === 'survival' ? miningSpeed(def.name, heldTool) : 1;
           const mult = base * efficiencyMult(effLvl);
           breakProgress += (dt * mult) / (def.hardness * 1.5);
           if (breakProgress >= 1) {
@@ -1574,7 +1654,11 @@ function startGame(
       const hitDef =
         currentHit && !mobPriority ? registry.def(currentHit.block) : null;
       const curTool = hotbar.current.tool?.def ?? null;
-      if (hitDef && hitDef.name === 'crafting_table') {
+      if (mobPriority && mobHit && mobHit.mob.kind === 'villager') {
+        // 右键村民：打开交易界面（MC）
+        tradingUI.open(mobHit.mob.uid);
+        useCooldown = 0.3;
+      } else if (hitDef && hitDef.name === 'crafting_table') {
         craftingTable.open();
         useCooldown = 0.3;
       } else if (hitDef && hitDef.name === 'furnace') {
@@ -1854,7 +1938,18 @@ function startGame(
           if (m.kind === 'ghast') {
             // 恶魂火球：直线飞行（无下坠），命中即伤（复用箭矢管线）
             const len = Math.hypot(tx, ty0, tz) || 1;
-            arrowManager.spawn(sx, sy, sz, tx / len, ty0 / len, tz / len, 12, true, 5, 0);
+            arrowManager.spawn(
+              sx,
+              sy,
+              sz,
+              tx / len,
+              ty0 / len,
+              tz / len,
+              12,
+              true,
+              5,
+              0,
+            );
             sfx.playShoot();
             return;
           }

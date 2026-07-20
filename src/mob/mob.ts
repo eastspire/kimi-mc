@@ -11,6 +11,7 @@ import {
   buildEndermanModel,
   buildZombiePiglinModel,
   buildGhastModel,
+  buildVillagerModel,
   setMobHurt,
   type MobModel,
 } from './model';
@@ -35,7 +36,8 @@ export type MobKind =
   | 'spider'
   | 'enderman'
   | 'zombie_piglin'
-  | 'ghast';
+  | 'ghast'
+  | 'villager';
 
 const GRAVITY = 27;
 const TERMINAL_VEL = -52;
@@ -66,6 +68,7 @@ const DIMS: Record<MobKind, MobDims> = {
   enderman: { half: 0.3, height: 2.9, speed: 1.5, hp: 40 },
   zombie_piglin: { half: 0.3, height: 1.95, speed: 1.3, hp: 20 },
   ghast: { half: 2.0, height: 4.0, speed: 0.7, hp: 10 },
+  villager: { half: 0.3, height: 1.95, speed: 0.5, hp: 20 },
 };
 
 /** 腿摆动相位偏移：四足对角同相，双足左右交替 */
@@ -81,6 +84,7 @@ const LEG_PHASE: Record<MobKind, number[]> = {
   enderman: [0, Math.PI],
   zombie_piglin: [0, Math.PI],
   ghast: [], // 触手由 syncModel 单独摆动
+  villager: [0, Math.PI],
 };
 
 const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
@@ -95,6 +99,7 @@ const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
   enderman: buildEndermanModel,
   zombie_piglin: buildZombiePiglinModel,
   ghast: buildGhastModel,
+  villager: buildVillagerModel,
 };
 
 /** 敌对生物（追击玩家）；骷髅/僵尸怕日晒，苦力怕/蜘蛛不怕 */
@@ -111,6 +116,8 @@ export const SUN_BURNS: ReadonlySet<MobKind> = new Set(['zombie', 'skeleton']);
 export class Mob {
   readonly model: MobModel;
   readonly half: number;
+  /** 村民身份种子（交易表固定用）；非村民为 0 */
+  readonly uid: number;
   readonly height: number;
 
   x: number;
@@ -176,6 +183,7 @@ export class Mob {
     x: number,
     y: number,
     z: number,
+    uid = 0,
   ) {
     const d = DIMS[kind];
     this.half = d.half;
@@ -185,6 +193,7 @@ export class Mob {
     this.x = x;
     this.y = y;
     this.z = z;
+    this.uid = uid !== 0 ? uid : ((x * 73856093) ^ (z * 19349663) ^ 0x9e3779) | 0;
     this.yaw = Math.random() * Math.PI * 2;
     this.aiTimer = 1 + Math.random() * 3;
     this.legPhase = LEG_PHASE[kind];

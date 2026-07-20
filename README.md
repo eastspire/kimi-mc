@@ -9,10 +9,10 @@ HTTP 从 `public/models/` 加载（Minecraft 风格 `parent`/`textures`/`element
 ## 运行
 
 ```bash
-npm.cmd install
-npm.cmd run dev      # 开发
-npm.cmd run build    # 产物输出到 dist/
-npm.cmd run preview  # 预览构建产物
+npm install
+npm run dev      # 开发
+npm run build    # 产物输出到 dist/
+npm run preview  # 预览构建产物
 ```
 
 ## 操作

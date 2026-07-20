@@ -14,7 +14,8 @@ const PX = 18; // x/z 各外扩 1
 const PZ = 18;
 const PH = 128;
 
-const pidx = (x: number, y: number, z: number): number => x + 1 + PX * (z + 1 + PZ * y);
+const pidx = (x: number, y: number, z: number): number =>
+  x + 1 + PX * (z + 1 + PZ * y);
 
 const AO_CURVE = [0.55, 0.7, 0.85, 1.0];
 const WATER_DROP = 2 / 16; // 水面下沉
@@ -47,52 +48,221 @@ interface DirSpec {
 }
 
 const DIRS: readonly DirSpec[] = [
-  { name: 'down',  axis: 1, sign: -1, shade: 0.5, t1: 0, t2: 2, cs: [[-1, -1], [1, -1], [1, 1], [-1, 1]] },
-  { name: 'up',    axis: 1, sign: 1,  shade: 1.0, t1: 0, t2: 2, cs: [[-1, -1], [-1, 1], [1, 1], [1, -1]] },
-  { name: 'north', axis: 2, sign: -1, shade: 0.8, t1: 0, t2: 1, cs: [[1, -1], [-1, -1], [-1, 1], [1, 1]] },
-  { name: 'south', axis: 2, sign: 1,  shade: 0.8, t1: 0, t2: 1, cs: [[-1, -1], [1, -1], [1, 1], [-1, 1]] },
-  { name: 'west',  axis: 0, sign: -1, shade: 0.6, t1: 2, t2: 1, cs: [[-1, -1], [1, -1], [1, 1], [-1, 1]] },
-  { name: 'east',  axis: 0, sign: 1,  shade: 0.6, t1: 2, t2: 1, cs: [[1, -1], [-1, -1], [-1, 1], [1, 1]] },
+  {
+    name: 'down',
+    axis: 1,
+    sign: -1,
+    shade: 0.5,
+    t1: 0,
+    t2: 2,
+    cs: [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ],
+  },
+  {
+    name: 'up',
+    axis: 1,
+    sign: 1,
+    shade: 1.0,
+    t1: 0,
+    t2: 2,
+    cs: [
+      [-1, -1],
+      [-1, 1],
+      [1, 1],
+      [1, -1],
+    ],
+  },
+  {
+    name: 'north',
+    axis: 2,
+    sign: -1,
+    shade: 0.8,
+    t1: 0,
+    t2: 1,
+    cs: [
+      [1, -1],
+      [-1, -1],
+      [-1, 1],
+      [1, 1],
+    ],
+  },
+  {
+    name: 'south',
+    axis: 2,
+    sign: 1,
+    shade: 0.8,
+    t1: 0,
+    t2: 1,
+    cs: [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ],
+  },
+  {
+    name: 'west',
+    axis: 0,
+    sign: -1,
+    shade: 0.6,
+    t1: 2,
+    t2: 1,
+    cs: [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ],
+  },
+  {
+    name: 'east',
+    axis: 0,
+    sign: 1,
+    shade: 0.6,
+    t1: 2,
+    t2: 1,
+    cs: [
+      [1, -1],
+      [-1, -1],
+      [-1, 1],
+      [1, 1],
+    ],
+  },
 ];
 
 /** 面四角在区块局部坐标中的偏移（CCW 外向），按 (axis,sign) 给出 */
 function faceCorners(
-  dir: DirSpec, s: number, i: number, j: number, w: number, h: number,
+  dir: DirSpec,
+  s: number,
+  i: number,
+  j: number,
+  w: number,
+  h: number,
 ): [number, number, number][] {
   switch (dir.name) {
-    case 'up':    return [[i, s + 1, j], [i, s + 1, j + h], [i + w, s + 1, j + h], [i + w, s + 1, j]];
-    case 'down':  return [[i, s, j], [i + w, s, j], [i + w, s, j + h], [i, s, j + h]];
-    case 'east':  return [[s + 1, j, i + w], [s + 1, j, i], [s + 1, j + h, i], [s + 1, j + h, i + w]];
-    case 'west':  return [[s, j, i], [s, j, i + w], [s, j + h, i + w], [s, j + h, i]];
-    case 'south': return [[i, j, s + 1], [i + w, j, s + 1], [i + w, j + h, s + 1], [i, j + h, s + 1]];
-    case 'north': return [[i + w, j, s], [i, j, s], [i, j + h, s], [i + w, j + h, s]];
+    case 'up':
+      return [
+        [i, s + 1, j],
+        [i, s + 1, j + h],
+        [i + w, s + 1, j + h],
+        [i + w, s + 1, j],
+      ];
+    case 'down':
+      return [
+        [i, s, j],
+        [i + w, s, j],
+        [i + w, s, j + h],
+        [i, s, j + h],
+      ];
+    case 'east':
+      return [
+        [s + 1, j, i + w],
+        [s + 1, j, i],
+        [s + 1, j + h, i],
+        [s + 1, j + h, i + w],
+      ];
+    case 'west':
+      return [
+        [s, j, i],
+        [s, j, i + w],
+        [s, j + h, i + w],
+        [s, j + h, i],
+      ];
+    case 'south':
+      return [
+        [i, j, s + 1],
+        [i + w, j, s + 1],
+        [i + w, j + h, s + 1],
+        [i, j + h, s + 1],
+      ];
+    case 'north':
+      return [
+        [i + w, j, s],
+        [i, j, s],
+        [i, j + h, s],
+        [i + w, j + h, s],
+      ];
   }
 }
 
 /** 局部 UV（可被贪心合并放大到 w×h，shader 内 fract 重复） */
 function faceUVs(dir: DirSpec, w: number, h: number): [number, number][] {
-  if (dir.name === 'up') return [[0, 0], [0, h], [w, h], [w, 0]];
-  return [[0, 0], [w, 0], [w, h], [0, h]];
+  if (dir.name === 'up')
+    return [
+      [0, 0],
+      [0, h],
+      [w, h],
+      [w, 0],
+    ];
+  return [
+    [0, 0],
+    [w, 0],
+    [w, h],
+    [0, h],
+  ];
 }
 
 // 慢路径：单位立方各面角点
 const BOX_FACE_CORNERS: Record<FaceName, [number, number, number][]> = {
-  down:  [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]],
-  up:    [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]],
-  north: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]],
-  south: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]],
-  west:  [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]],
-  east:  [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]],
+  down: [
+    [0, 0, 0],
+    [1, 0, 0],
+    [1, 0, 1],
+    [0, 0, 1],
+  ],
+  up: [
+    [0, 1, 0],
+    [0, 1, 1],
+    [1, 1, 1],
+    [1, 1, 0],
+  ],
+  north: [
+    [1, 0, 0],
+    [0, 0, 0],
+    [0, 1, 0],
+    [1, 1, 0],
+  ],
+  south: [
+    [0, 0, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+    [0, 1, 1],
+  ],
+  west: [
+    [0, 0, 0],
+    [0, 0, 1],
+    [0, 1, 1],
+    [0, 1, 0],
+  ],
+  east: [
+    [1, 0, 1],
+    [1, 0, 0],
+    [1, 1, 0],
+    [1, 1, 1],
+  ],
 };
 
 const FACE_SHADE: Record<FaceName, number> = {
-  down: 0.5, up: 1.0, north: 0.8, south: 0.8, west: 0.6, east: 0.6,
+  down: 0.5,
+  up: 1.0,
+  north: 0.8,
+  south: 0.8,
+  west: 0.6,
+  east: 0.6,
 };
 
 /** 面方向单位向量（cullface / AO 法向层偏移用） */
 const FACE_NORMAL: Record<FaceName, [number, number, number]> = {
-  down: [0, -1, 0], up: [0, 1, 0], north: [0, 0, -1],
-  south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0],
+  down: [0, -1, 0],
+  up: [0, 1, 0],
+  north: [0, 0, -1],
+  south: [0, 0, 1],
+  west: [-1, 0, 0],
+  east: [1, 0, 0],
 };
 
 function pushQuad(
@@ -105,7 +275,12 @@ function pushQuad(
   lowerTop: boolean,
 ): void {
   const base = arr.positions.length / 3;
-  const maxY = Math.max(corners[0][1], corners[1][1], corners[2][1], corners[3][1]);
+  const maxY = Math.max(
+    corners[0][1],
+    corners[1][1],
+    corners[2][1],
+    corners[3][1],
+  );
   for (let k = 0; k < 4; k++) {
     let [cx, cy, cz] = corners[k];
     if (lowerTop && corners[k][1] === maxY) cy -= WATER_DROP;
@@ -122,16 +297,22 @@ function pushQuad(
  * 元素某面的方块局部坐标角点（0..1，含元素旋转）。
  * 慢路径建模与手持物品建模共用。
  */
-export function elementFaceCorners(el: ElementDef, fname: FaceName): [number, number, number][] {
+export function elementFaceCorners(
+  el: ElementDef,
+  fname: FaceName,
+): [number, number, number][] {
   return BOX_FACE_CORNERS[fname].map((u) => {
     let ex = el.from[0] + u[0] * (el.to[0] - el.from[0]);
     const ey = el.from[1] + u[1] * (el.to[1] - el.from[1]);
     let ez = el.from[2] + u[2] * (el.to[2] - el.from[2]);
     if (el.rotation) {
       const rad = (el.rotation.angle * Math.PI) / 180;
-      const cos = Math.cos(rad), sin = Math.sin(rad);
-      const ox = el.rotation.origin[0], oz = el.rotation.origin[2];
-      const dx = ex - ox, dz = ez - oz;
+      const cos = Math.cos(rad),
+        sin = Math.sin(rad);
+      const ox = el.rotation.origin[0],
+        oz = el.rotation.origin[2];
+      const dx = ex - ox,
+        dz = ez - oz;
       ex = ox + dx * cos + dz * sin;
       ez = oz - dx * sin + dz * cos;
     }
@@ -151,13 +332,24 @@ export function buildBlockGeometry(def: BlockDef): MeshArrays | null {
     for (const fname of Object.keys(el.faces) as FaceName[]) {
       const face = el.faces[fname]!;
       const corners = elementFaceCorners(el, fname).map(
-        c => [c[0] - 0.5, c[1] - 0.5, c[2] - 0.5] as [number, number, number],
+        (c) => [c[0] - 0.5, c[1] - 0.5, c[2] - 0.5] as [number, number, number],
       );
       const [u0, v0, u1, v1] = face.uv ?? [0, 0, 1, 1];
       const uvs: [number, number][] = [
-        [u0, v0], [u1, v0], [u1, v1], [u0, v1],
+        [u0, v0],
+        [u1, v0],
+        [u1, v1],
+        [u0, v1],
       ];
-      pushQuad(arr, corners, uvs, face.tile, FACE_SHADE[fname], [3, 3, 3, 3], false);
+      pushQuad(
+        arr,
+        corners,
+        uvs,
+        face.tile,
+        FACE_SHADE[fname],
+        [3, 3, 3, 3],
+        false,
+      );
     }
   }
   return arr.positions.length > 0 ? arr : null;
@@ -166,6 +358,7 @@ export function buildBlockGeometry(def: BlockDef): MeshArrays | null {
 export function buildChunkMesh(
   data: Uint8Array,
   defs: (BlockDef | null)[],
+  aoOn: boolean,
 ): ChunkMeshOutput {
   const opaque = newArrays();
   const translucent = newArrays();
@@ -175,7 +368,8 @@ export function buildChunkMesh(
     if (y >= PH) return 0;
     return data[pidx(x, y, z)];
   };
-  const defOf = (id: number): BlockDef | null => (id > 0 ? (defs[id] ?? null) : null);
+  const defOf = (id: number): BlockDef | null =>
+    id > 0 ? (defs[id] ?? null) : null;
   const occludesAt = (x: number, y: number, z: number): boolean => {
     if (y < 0) return true;
     if (y >= PH) return false;
@@ -199,13 +393,24 @@ export function buildChunkMesh(
               if (occludesAt(x + n[0], y + n[1], z + n[2])) continue;
             }
             const corners = elementFaceCorners(el, fname).map(
-              c => [x + c[0], y + c[1], z + c[2]] as [number, number, number],
+              (c) => [x + c[0], y + c[1], z + c[2]] as [number, number, number],
             );
             const [u0, v0, u1, v1] = face.uv ?? [0, 0, 1, 1];
             const uvs: [number, number][] = [
-              [u0, v0], [u1, v0], [u1, v1], [u0, v1],
+              [u0, v0],
+              [u1, v0],
+              [u1, v1],
+              [u0, v1],
             ];
-            pushQuad(arr, corners, uvs, face.tile, FACE_SHADE[fname], [3, 3, 3, 3], false);
+            pushQuad(
+              arr,
+              corners,
+              uvs,
+              face.tile,
+              FACE_SHADE[fname],
+              [3, 3, 3, 3],
+              false,
+            );
           }
         }
       }
@@ -224,8 +429,12 @@ export function buildChunkMesh(
       const nx = dir.axis === 0 ? dir.sign : 0;
       const ny = dir.axis === 1 ? dir.sign : 0;
       const nz = dir.axis === 2 ? dir.sign : 0;
-      const t1x = dir.t1 === 0 ? 1 : 0, t1y = dir.t1 === 1 ? 1 : 0, t1z = dir.t1 === 2 ? 1 : 0;
-      const t2x = dir.t2 === 0 ? 1 : 0, t2y = dir.t2 === 1 ? 1 : 0, t2z = dir.t2 === 2 ? 1 : 0;
+      const t1x = dir.t1 === 0 ? 1 : 0,
+        t1y = dir.t1 === 1 ? 1 : 0,
+        t1z = dir.t1 === 2 ? 1 : 0;
+      const t2x = dir.t2 === 0 ? 1 : 0,
+        t2y = dir.t2 === 1 ? 1 : 0,
+        t2z = dir.t2 === 2 ? 1 : 0;
 
       for (let s = 0; s < S; s++) {
         mask.fill(0, 0, W * H);
@@ -233,13 +442,24 @@ export function buildChunkMesh(
         for (let v = 0; v < H; v++) {
           for (let u = 0; u < W; u++) {
             let x: number, y: number, z: number;
-            if (dir.axis === 0) { x = s; y = v; z = u; }
-            else if (dir.axis === 1) { x = u; y = s; z = v; }
-            else { x = u; y = v; z = s; }
+            if (dir.axis === 0) {
+              x = s;
+              y = v;
+              z = u;
+            } else if (dir.axis === 1) {
+              x = u;
+              y = s;
+              z = v;
+            } else {
+              x = u;
+              y = v;
+              z = s;
+            }
             const id = rawAt(x, y, z);
             const def = defOf(id);
             if (!def || !def.fullCube) continue;
-            if ((def.renderLayer === 'translucent' ? 1 : 0) !== bucket) continue;
+            if ((def.renderLayer === 'translucent' ? 1 : 0) !== bucket)
+              continue;
             // 隐藏面剔除
             const rid = rawAt(x + nx, y + ny, z + nz);
             if (rid === -1) continue;
@@ -251,13 +471,31 @@ export function buildChunkMesh(
             }
             const tile = def.faceTiles[dir.name];
             if (tile === undefined) continue;
-            let ao = 0b11111111; // 4×2bit = 3,3,3,3
-            if (bucket === 0) {
+            let ao = 0b11111111; // 4×2bit = 3,3,3,3（AO 关 → 恒为最亮，合并更充分）
+            if (bucket === 0 && aoOn) {
               ao = 0;
               for (let k = 0; k < 4; k++) {
-                const s1 = occludesAt(x + nx + dir.cs[k][0] * t1x, y + ny + dir.cs[k][0] * t1y, z + nz + dir.cs[k][0] * t1z) ? 1 : 0;
-                const s2 = occludesAt(x + nx + dir.cs[k][1] * t2x, y + ny + dir.cs[k][1] * t2y, z + nz + dir.cs[k][1] * t2z) ? 1 : 0;
-                const cc = occludesAt(x + nx + dir.cs[k][0] * t1x + dir.cs[k][1] * t2x, y + ny + dir.cs[k][0] * t1y + dir.cs[k][1] * t2y, z + nz + dir.cs[k][0] * t1z + dir.cs[k][1] * t2z) ? 1 : 0;
+                const s1 = occludesAt(
+                  x + nx + dir.cs[k][0] * t1x,
+                  y + ny + dir.cs[k][0] * t1y,
+                  z + nz + dir.cs[k][0] * t1z,
+                )
+                  ? 1
+                  : 0;
+                const s2 = occludesAt(
+                  x + nx + dir.cs[k][1] * t2x,
+                  y + ny + dir.cs[k][1] * t2y,
+                  z + nz + dir.cs[k][1] * t2z,
+                )
+                  ? 1
+                  : 0;
+                const cc = occludesAt(
+                  x + nx + dir.cs[k][0] * t1x + dir.cs[k][1] * t2x,
+                  y + ny + dir.cs[k][0] * t1y + dir.cs[k][1] * t2y,
+                  z + nz + dir.cs[k][0] * t1z + dir.cs[k][1] * t2z,
+                )
+                  ? 1
+                  : 0;
                 const a = s1 && s2 ? 0 : 3 - (s1 + s2 + cc);
                 ao |= a << (k * 2);
               }
@@ -280,13 +518,27 @@ export function buildChunkMesh(
               }
               h++;
             }
-            for (let dv = 0; dv < h; dv++) mask.fill(0, u + W * (v + dv), u + w + W * (v + dv));
+            for (let dv = 0; dv < h; dv++)
+              mask.fill(0, u + W * (v + dv), u + w + W * (v + dv));
 
             const tile = (val & 0xff) - 1;
             const aoPacked = (val >> 8) & 0xff;
-            const ao = [aoPacked & 3, (aoPacked >> 2) & 3, (aoPacked >> 4) & 3, (aoPacked >> 6) & 3];
+            const ao = [
+              aoPacked & 3,
+              (aoPacked >> 2) & 3,
+              (aoPacked >> 4) & 3,
+              (aoPacked >> 6) & 3,
+            ];
             const lowerTop = bucket === 1 && ((val >> 16) & 1) === 1;
-            pushQuad(arr, faceCorners(dir, s, u, v, w, h), faceUVs(dir, w, h), tile, dir.shade, ao, lowerTop);
+            pushQuad(
+              arr,
+              faceCorners(dir, s, u, v, w, h),
+              faceUVs(dir, w, h),
+              tile,
+              dir.shade,
+              ao,
+              lowerTop,
+            );
           }
         }
       }

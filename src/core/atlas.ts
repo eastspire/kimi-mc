@@ -10,10 +10,34 @@ export const ATLAS_COLS = 8;
 export const ATLAS_ROWS = 8;
 
 export const TILE_NAMES = [
-  'grass_top', 'grass_side', 'dirt', 'stone', 'sand', 'sandstone',
-  'log_side', 'log_top', 'leaves', 'planks', 'coal_ore', 'iron_ore',
-  'gold_ore', 'diamond_ore', 'bedrock', 'water_still', 'tall_grass',
-  'flower_red', 'flower_yellow', 'glass',
+  'grass_top',
+  'grass_side',
+  'dirt',
+  'stone',
+  'sand',
+  'sandstone',
+  'log_side',
+  'log_top',
+  'leaves',
+  'planks',
+  'coal_ore',
+  'iron_ore',
+  'gold_ore',
+  'diamond_ore',
+  'bedrock',
+  'water_still',
+  'tall_grass',
+  'flower_red',
+  'flower_yellow',
+  'glass',
+  'cobblestone',
+  'gravel',
+  'bricks',
+  'stone_bricks',
+  'glowstone',
+  'obsidian',
+  'snow',
+  'clay',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -51,7 +75,13 @@ function px(ctx: Ctx, x: number, y: number, c: string): void {
 }
 
 /** 底色 + 噪点杂色 */
-function speckle(ctx: Ctx, rnd: () => number, base: string, spots: string[], density = 0.5): void {
+function speckle(
+  ctx: Ctx,
+  rnd: () => number,
+  base: string,
+  spots: string[],
+  density = 0.5,
+): void {
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
   for (let y = 0; y < TILE_SIZE; y++) {
@@ -64,12 +94,25 @@ function speckle(ctx: Ctx, rnd: () => number, base: string, spots: string[], den
 // ---------- 各贴格绘制（原创像素画） ----------
 
 const paintGrassTop: Painter = (ctx, _ox, _oy, rnd) => {
-  speckle(ctx, rnd, '#69a83e', ['#5d9433', '#74b544', '#5a8f31', '#7cbc4b'], 0.55);
+  speckle(
+    ctx,
+    rnd,
+    '#69a83e',
+    ['#5d9433', '#74b544', '#5a8f31', '#7cbc4b'],
+    0.55,
+  );
 };
 
 const paintDirt: Painter = (ctx, _ox, _oy, rnd) => {
-  speckle(ctx, rnd, '#866043', ['#79553a', '#8f6849', '#6e4e35', '#96704d'], 0.5);
-  for (let i = 0; i < 5; i++) px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#a08b70'); // 小石子
+  speckle(
+    ctx,
+    rnd,
+    '#866043',
+    ['#79553a', '#8f6849', '#6e4e35', '#96704d'],
+    0.5,
+  );
+  for (let i = 0; i < 5; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#a08b70'); // 小石子
 };
 
 const paintGrassSide: Painter = (ctx, ox, oy, rnd) => {
@@ -84,13 +127,21 @@ const paintGrassSide: Painter = (ctx, ox, oy, rnd) => {
 };
 
 const paintStone: Painter = (ctx, _ox, _oy, rnd) => {
-  speckle(ctx, rnd, '#7d7d7d', ['#737373', '#858585', '#6e6e6e', '#8c8c8c'], 0.45);
+  speckle(
+    ctx,
+    rnd,
+    '#7d7d7d',
+    ['#737373', '#858585', '#6e6e6e', '#8c8c8c'],
+    0.45,
+  );
   // 几道石纹
   for (let i = 0; i < 3; i++) {
-    let x = (rnd() * 14) | 0, y = (rnd() * 14) | 0;
+    let x = (rnd() * 14) | 0,
+      y = (rnd() * 14) | 0;
     for (let s = 0; s < 5; s++) {
       px(ctx, x, y, '#666666');
-      x += rnd() < 0.5 ? 1 : 0; y += rnd() < 0.5 ? 1 : 0;
+      x += rnd() < 0.5 ? 1 : 0;
+      y += rnd() < 0.5 ? 1 : 0;
       if (x > 15 || y > 15) break;
     }
   }
@@ -103,8 +154,10 @@ const paintSand: Painter = (ctx, _ox, _oy, rnd) => {
 const paintSandstone: Painter = (ctx, ox, oy, rnd) => {
   paintSand(ctx, ox, oy, rnd);
   for (let x = 0; x < 16; x++) {
-    px(ctx, x, 0, '#c8bd85'); px(ctx, x, 1, '#cfc489');
-    px(ctx, x, 14, '#cfc489'); px(ctx, x, 15, '#c8bd85');
+    px(ctx, x, 0, '#c8bd85');
+    px(ctx, x, 1, '#cfc489');
+    px(ctx, x, 14, '#cfc489');
+    px(ctx, x, 15, '#c8bd85');
   }
   for (let x = 3; x < 13; x++) px(ctx, x, 7 + ((rnd() * 2) | 0), '#d0c68f'); // 中部层理
 };
@@ -119,19 +172,28 @@ const paintLogSide: Painter = (ctx, _ox, _oy, rnd) => {
     }
   }
   // 树皮疙瘩
-  for (let i = 0; i < 4; i++) px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#42321f');
+  for (let i = 0; i < 4; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#42321f');
 };
 
 const paintLogTop: Painter = (ctx, _ox, _oy, rnd) => {
   ctx.fillStyle = '#6b5433';
   ctx.fillRect(0, 0, 16, 16);
   // 年轮：同心方环
-  const rings = ['#b0925e', '#9c7f4e', '#b0925e', '#8a6f45', '#b0925e', '#6b5433'];
+  const rings = [
+    '#b0925e',
+    '#9c7f4e',
+    '#b0925e',
+    '#8a6f45',
+    '#b0925e',
+    '#6b5433',
+  ];
   for (let r = 1; r < 8; r++) {
     ctx.fillStyle = rings[r % rings.length];
     ctx.fillRect(r, r, 16 - r * 2, 16 - r * 2);
   }
-  for (let i = 0; i < 10; i++) px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#5c472c');
+  for (let i = 0; i < 10; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#5c472c');
 };
 
 const paintLeaves: Painter = (ctx, _ox, _oy, rnd) => {
@@ -156,22 +218,43 @@ const paintPlanks: Painter = (ctx, _ox, _oy, rnd) => {
     }
   }
   // 板缝：每 4 行一道横缝 + 交错竖缝
-  for (let x = 0; x < 16; x++) for (const y of [3, 7, 11, 15]) px(ctx, x, y, '#7d5f38');
+  for (let x = 0; x < 16; x++)
+    for (const y of [3, 7, 11, 15]) px(ctx, x, y, '#7d5f38');
   const joints = [12, 4, 14, 6];
   for (let b = 0; b < 4; b++) {
     const jx = joints[b];
     for (let y = b * 4; y < b * 4 + 4; y++) px(ctx, jx % 16, y, '#7d5f38');
   }
-  for (const [nx, ny] of [[2, 1], [9, 5], [5, 9], [13, 13]] as const) px(ctx, nx, ny, '#6b4f2e'); // 钉眼
+  for (const [nx, ny] of [
+    [2, 1],
+    [9, 5],
+    [5, 9],
+    [13, 13],
+  ] as const)
+    px(ctx, nx, ny, '#6b4f2e'); // 钉眼
 };
 
 function paintOre(spot: string, spotHi: string): Painter {
   return (ctx, ox, oy, rnd) => {
     paintStone(ctx, ox, oy, rnd);
     for (let v = 0; v < 4; v++) {
-      const bx = 1 + ((rnd() * 12) | 0), by = 1 + ((rnd() * 12) | 0);
-      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1], [2, 0], [0, 2]] as const) {
-        if (rnd() < 0.75) px(ctx, Math.min(15, bx + dx), Math.min(15, by + dy), rnd() < 0.4 ? spotHi : spot);
+      const bx = 1 + ((rnd() * 12) | 0),
+        by = 1 + ((rnd() * 12) | 0);
+      for (const [dx, dy] of [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
+        [2, 0],
+        [0, 2],
+      ] as const) {
+        if (rnd() < 0.75)
+          px(
+            ctx,
+            Math.min(15, bx + dx),
+            Math.min(15, by + dy),
+            rnd() < 0.4 ? spotHi : spot,
+          );
       }
     }
   };
@@ -181,12 +264,14 @@ const paintBedrock: Painter = (ctx, _ox, _oy, rnd) => {
   ctx.fillStyle = '#565656';
   ctx.fillRect(0, 0, 16, 16);
   for (let i = 0; i < 9; i++) {
-    const bx = (rnd() * 13) | 0, by = (rnd() * 13) | 0;
+    const bx = (rnd() * 13) | 0,
+      by = (rnd() * 13) | 0;
     const c = rnd() < 0.5 ? '#2e2e2e' : '#767676';
     ctx.fillStyle = c;
     ctx.fillRect(bx, by, 2 + ((rnd() * 3) | 0), 2 + ((rnd() * 2) | 0));
   }
-  for (let i = 0; i < 20; i++) px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#454545');
+  for (let i = 0; i < 20; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#454545');
 };
 
 const paintWater: Painter = (ctx, _ox, _oy, rnd) => {
@@ -224,9 +309,20 @@ function paintFlower(petal: string, center: string): Painter {
     ctx.clearRect(0, 0, 16, 16);
     // 茎
     for (let y = 7; y < 16; y++) px(ctx, 8, y, '#4a7d2a');
-    px(ctx, 7, 12, '#4a7d2a'); px(ctx, 9, 13, '#4a7d2a'); // 小叶
+    px(ctx, 7, 12, '#4a7d2a');
+    px(ctx, 9, 13, '#4a7d2a'); // 小叶
     // 花瓣十字
-    for (const [dx, dy] of [[0, -2], [-1, -1], [0, -1], [1, -1], [-2, 0], [-1, 0], [1, 0], [2, 0], [0, 1]] as const) {
+    for (const [dx, dy] of [
+      [0, -2],
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+      [-2, 0],
+      [-1, 0],
+      [1, 0],
+      [2, 0],
+      [0, 1],
+    ] as const) {
       px(ctx, 8 + dx, 6 + dy, rnd() < 0.25 ? '#ffffff22' : petal);
     }
     px(ctx, 8, 6, center);
@@ -239,14 +335,130 @@ const paintGlass: Painter = (ctx, _ox, _oy, _rnd) => {
   ctx.clearRect(0, 0, 16, 16);
   ctx.fillStyle = 'rgba(220,235,240,0.85)';
   for (let i = 0; i < 16; i++) {
-    px(ctx, i, 0, '#dcebf0'); px(ctx, i, 15, '#dcebf0');
-    px(ctx, 0, i, '#dcebf0'); px(ctx, 15, i, '#dcebf0');
+    px(ctx, i, 0, '#dcebf0');
+    px(ctx, i, 15, '#dcebf0');
+    px(ctx, 0, i, '#dcebf0');
+    px(ctx, 15, i, '#dcebf0');
   }
   // 斜向高光
   ctx.fillStyle = 'rgba(230,245,250,0.4)';
-  for (const [x, y] of [[3, 12], [4, 11], [5, 10], [6, 9], [9, 6], [10, 5], [11, 4], [12, 3]] as const) {
+  for (const [x, y] of [
+    [3, 12],
+    [4, 11],
+    [5, 10],
+    [6, 9],
+    [9, 6],
+    [10, 5],
+    [11, 4],
+    [12, 3],
+  ] as const) {
     ctx.fillRect(x, y, 1, 1);
   }
+};
+
+const paintCobblestone: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#7a7a7a', ['#6f6f6f', '#858585', '#676767'], 0.4);
+  // 错位石块轮廓 + 高光
+  for (let i = 0; i < 6; i++) {
+    const bx = 1 + ((rnd() * 11) | 0),
+      by = 1 + ((rnd() * 11) | 0);
+    const w = 3 + ((rnd() * 3) | 0),
+      h = 2 + ((rnd() * 3) | 0);
+    for (let x = 0; x < w; x++) {
+      px(ctx, Math.min(15, bx + x), by, '#565656');
+      px(ctx, Math.min(15, bx + x), Math.min(15, by + h), '#565656');
+    }
+    for (let y = 0; y <= h; y++) {
+      px(ctx, bx, Math.min(15, by + y), '#565656');
+      px(ctx, Math.min(15, bx + w), Math.min(15, by + y), '#565656');
+    }
+    px(ctx, Math.min(15, bx + 1), Math.min(15, by + 1), '#8c8c8c');
+  }
+};
+
+const paintGravel: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(
+    ctx,
+    rnd,
+    '#8a8378',
+    ['#7d7568', '#968e81', '#6e675c', '#a29a8d', '#5f594f'],
+    0.65,
+  );
+};
+
+const paintBricks: Painter = (ctx, _ox, _oy, rnd) => {
+  ctx.fillStyle = '#9c4f38';
+  ctx.fillRect(0, 0, 16, 16);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      if (rnd() < 0.2) px(ctx, x, y, rnd() < 0.5 ? '#8f4632' : '#a85740');
+    }
+  }
+  // 灰浆缝：每 4 行一道横缝，竖缝逐行交错
+  for (let x = 0; x < 16; x++)
+    for (const y of [3, 7, 11, 15]) px(ctx, x, y, '#b8a89a');
+  for (let b = 0; b < 4; b++) {
+    const jx = b % 2 === 0 ? 8 : 0;
+    for (let y = b * 4; y < b * 4 + 4; y++)
+      px(ctx, (jx + 4) % 16, y, '#b8a89a');
+    for (let y = b * 4; y < b * 4 + 4; y++) px(ctx, jx, y, '#b8a89a');
+  }
+};
+
+const paintStoneBricks: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#7d7d7d', ['#737373', '#858585'], 0.3);
+  // 4 块大砖 + 深色砖缝
+  for (let i = 0; i < 16; i++) {
+    px(ctx, i, 7, '#5e5e5e');
+    px(ctx, i, 8, '#5e5e5e');
+    px(ctx, 7, i, '#5e5e5e');
+    px(ctx, 8, i, '#5e5e5e');
+  }
+  for (let i = 0; i < 16; i++) {
+    px(ctx, i, 0, '#565656');
+    px(ctx, i, 15, '#565656');
+    px(ctx, 0, i, '#565656');
+    px(ctx, 15, i, '#565656');
+  }
+  for (let i = 0; i < 8; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#6a6a6a'); // 磨损
+};
+
+const paintGlowstone: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(
+    ctx,
+    rnd,
+    '#e8c76a',
+    ['#f5dc8a', '#d4af52', '#c99f45', '#ffedaa'],
+    0.6,
+  );
+  // 萤石斑块
+  for (let i = 0; i < 5; i++) {
+    const bx = (rnd() * 13) | 0,
+      by = (rnd() * 13) | 0;
+    ctx.fillStyle = rnd() < 0.5 ? '#fff0b8' : '#d9b455';
+    ctx.fillRect(bx, by, 2 + ((rnd() * 2) | 0), 2 + ((rnd() * 2) | 0));
+  }
+};
+
+const paintObsidian: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(
+    ctx,
+    rnd,
+    '#17101f',
+    ['#0f0a16', '#201530', '#241a38', '#0a0710'],
+    0.5,
+  );
+  for (let i = 0; i < 6; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#2e2044'); // 紫晶闪点
+};
+
+const paintSnow: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#f2fbfb', ['#e4f2f2', '#ffffff', '#dcecec'], 0.3);
+};
+
+const paintClay: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#9fa4b1', ['#9499a6', '#aab0bc', '#8b909d'], 0.35);
 };
 
 const PAINTERS: Record<TileName, Painter> = {
@@ -270,6 +482,14 @@ const PAINTERS: Record<TileName, Painter> = {
   flower_red: paintFlower('#d8362c', '#f0d040'),
   flower_yellow: paintFlower('#f2d13c', '#e8a820'),
   glass: paintGlass,
+  cobblestone: paintCobblestone,
+  gravel: paintGravel,
+  bricks: paintBricks,
+  stone_bricks: paintStoneBricks,
+  glowstone: paintGlowstone,
+  obsidian: paintObsidian,
+  snow: paintSnow,
+  clay: paintClay,
 };
 
 // ---------- 裂纹贴图（10 阶段，程序化绘制） ----------
@@ -326,12 +546,19 @@ export function createAtlas(): AtlasResult {
   TILE_NAMES.forEach((_name, i) => {
     const col = i % ATLAS_COLS;
     const row = (i / ATLAS_COLS) | 0;
-    let r = 0, g = 0, b = 0, n = 0;
+    let r = 0,
+      g = 0,
+      b = 0,
+      n = 0;
     for (let y = 0; y < TILE_SIZE; y++) {
       for (let x = 0; x < TILE_SIZE; x++) {
-        const p = ((row * TILE_SIZE + y) * canvas.width + col * TILE_SIZE + x) * 4;
+        const p =
+          ((row * TILE_SIZE + y) * canvas.width + col * TILE_SIZE + x) * 4;
         if (img[p + 3] > 128) {
-          r += img[p]; g += img[p + 1]; b += img[p + 2]; n++;
+          r += img[p];
+          g += img[p + 1];
+          b += img[p + 2];
+          n++;
         }
       }
     }

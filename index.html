@@ -14,7 +14,39 @@
       <div id="item-name"></div>
       <div id="hotbar"></div>
       <div id="debug"></div>
-      <div id="pause-hint" class="hidden">已暂停 — 点击画面继续（ESC 解锁鼠标）</div>
+      <div id="pause-menu" class="hidden">
+        <div id="pause-box">
+          <h2>游戏菜单</h2>
+          <label id="rd-row">
+            渲染距离：<span id="rd-value">8</span> 区块
+            <input
+              id="rd-slider"
+              type="range"
+              min="4"
+              max="16"
+              step="1"
+              value="8"
+            />
+          </label>
+          <label id="fov-row">
+            视野角度：<span id="fov-value">75</span>°
+            <input
+              id="fov-slider"
+              type="range"
+              min="30"
+              max="110"
+              step="1"
+              value="75"
+            />
+          </label>
+          <label id="ao-row">
+            <input id="ao-check" type="checkbox" checked />
+            平滑光照（AO）
+          </label>
+          <button id="resume-btn">回到游戏</button>
+          <div id="pause-tip">ESC 解锁鼠标 · 点击画面或按钮继续</div>
+        </div>
+      </div>
     </div>
 
     <!-- 开始 / 加载 / 错误 全屏界面 -->
@@ -23,7 +55,13 @@
         <h1 id="overlay-title">Minecraft Web 复刻</h1>
         <div id="overlay-sub">程序生成贴图 · 无版权素材 · Web 体素</div>
         <div id="seed-row">
-          <input id="seed-input" type="text" placeholder="种子（留空则随机）" autocomplete="off" spellcheck="false" />
+          <input
+            id="seed-input"
+            type="text"
+            placeholder="种子（留空则随机）"
+            autocomplete="off"
+            spellcheck="false"
+          />
         </div>
         <div id="overlay-progress-wrap" class="hidden">
           <div id="overlay-progress-text">正在生成世界…</div>
@@ -33,6 +71,16 @@
           <button id="continue-btn" class="hidden">继续上次的世界</button>
           <button id="overlay-btn">创建新世界</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 创造模式物品栏 -->
+    <div id="inv" class="hidden">
+      <div id="inv-box">
+        <h2>物品栏</h2>
+        <div id="inv-grid"></div>
+        <div id="inv-name">&nbsp;</div>
+        <div id="inv-tip">E / ESC 关闭 · 点击方块放入当前快捷栏槽位</div>
       </div>
     </div>
 

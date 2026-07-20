@@ -95,11 +95,14 @@ export class Sky {
   private stars: THREE.Points;
   private starMat: THREE.PointsMaterial;
   private underwater = false;
+  private readonly dirV = new THREE.Vector3(); // 复用，避免每帧分配
+  /** 渲染距离（区块），运行时可调，雾与天体距离随之更新 */
+  private dist = RENDER_DIST;
   /** 全局亮度系数（0.2 夜 ~ 1.0 昼），由 main 应用到材质 */
   daylight = 1;
 
   constructor(private scene: THREE.Scene, private renderer: THREE.WebGLRenderer) {
-    const far = RENDER_DIST * 16;
+    const far = this.dist * 16;
     scene.fog = new THREE.Fog(0x78a7ff, far * 0.55, far * 0.95);
 
     const geo = new THREE.PlaneGeometry(28, 28);
@@ -109,6 +112,21 @@ export class Sky {
     this.stars = s.points;
     this.starMat = s.mat;
     scene.add(this.sun, this.moon, this.stars);
+  }
+
+  /** 正常（非水下）雾距，供主循环出水恢复 */
+  normalFog(): { near: number; far: number } {
+    const far = this.dist * 16;
+    return { near: far * 0.55, far: far * 0.95 };
+  }
+
+  /** 渲染距离变化：雾立即同步（水下时不覆盖水下近雾），天体距离随下一帧更新 */
+  setRenderDist(r: number): void {
+    this.dist = r;
+    const nf = this.normalFog();
+    const fog = this.scene.fog as THREE.Fog;
+    fog.far = nf.far;
+    if (!this.underwater) fog.near = nf.near;
   }
 
   update(dt: number, camera: THREE.PerspectiveCamera, tinted: THREE.Material[]): void {
@@ -136,8 +154,8 @@ export class Sky {
 
     // 太阳/月亮位置（跟随相机，距离略小于雾远平面，180° 相对）
     const vis = !this.underwater;
-    const dist = RENDER_DIST * 16 * 0.9;
-    const dir = new THREE.Vector3(sunX, sunY, 0.25).normalize();
+    const dist = this.dist * 16 * 0.9;
+    const dir = this.dirV.set(sunX, sunY, 0.25).normalize(); // 复用向量，热循环零分配
     this.sun.position.copy(camera.position).addScaledVector(dir, dist);
     this.sun.lookAt(camera.position);
     this.sun.visible = vis && sunY > -0.15;

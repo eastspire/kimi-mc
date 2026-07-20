@@ -11,6 +11,8 @@ export interface ControlEvents {
   onSneak: (sneaking: boolean) => void;
   /** 双击 W 触发冲刺（不用 Ctrl+W，避免浏览器关页冲突） */
   onSprint: () => void;
+  /** E 打开创造模式物品栏 */
+  onInventory: () => void;
 }
 
 const MOUSE_SENS = 0.0022;
@@ -71,7 +73,9 @@ export class Controls {
         if (now - this.lastWDown < 260) this.events.onSprint();
         this.lastWDown = now;
       }
-      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.events.onSneak(true);
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight')
+        this.events.onSneak(true);
+      if (e.code === 'KeyE') this.events.onInventory();
       if (e.code.startsWith('Digit')) {
         const n = Number(e.code.slice(5));
         if (n >= 1 && n <= 9) this.events.onHotbar(n - 1);
@@ -79,7 +83,8 @@ export class Controls {
     });
     document.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
-      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.events.onSneak(false);
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight')
+        this.events.onSneak(false);
     });
   }
 
@@ -89,9 +94,15 @@ export class Controls {
   lock(): void {
     try {
       // 非用户手势场景（如自动化）会拒绝，吞掉避免未处理 rejection
-      const p = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
-      p?.catch?.(() => { /* 忽略：用户下次点击会再次尝试 */ });
-    } catch { /* 忽略 */ }
+      const p = this.canvas.requestPointerLock() as unknown as
+        | Promise<void>
+        | undefined;
+      p?.catch?.(() => {
+        /* 忽略：用户下次点击会再次尝试 */
+      });
+    } catch {
+      /* 忽略 */
+    }
   }
 
   get forward(): { x: number; z: number } {

@@ -4,7 +4,7 @@
 
 export class Hud {
   private itemNameEl = document.getElementById('item-name')!;
-  private pauseHintEl = document.getElementById('pause-hint')!;
+  private pauseHintEl = document.getElementById('pause-menu')!;
   private nameTimer = 0;
 
   showItemName(name: string): void {

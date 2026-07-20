@@ -4,13 +4,13 @@ import type { World } from '../world/world';
 import { chunkKey } from '../world/world';
 import type { WorldGen } from '../world/worldgen';
 import type { AtlasResult } from '../core/atlas';
-import type { MeshJobOut, PackedGeometry } from './mesher-worker';
+import type { JobOut, PackedGeometry } from './mesher-worker';
 
 // ============================================================
 // 区块管理：
-//  - 主线程按预算生成地形（加载界面有进度）
-//  - Worker 池并行网格化，优先级 = 距玩家距离
-//  - 每帧限量上传 GPU，编辑只重建本区块（边界加邻区块）
+//  - 地形生成 + 网格化全部在 Worker 池执行（主线程零噪声计算）
+//  - 优先级 = 距玩家距离；每帧限量上传 GPU
+//  - 编辑只重建本区块（边界加邻区块）
 // ============================================================
 
 export const RENDER_DIST = 8;
@@ -19,8 +19,19 @@ const PAD_X = 18;
 const PAD_Z = 18;
 const H = 128;
 
-interface WaitingJob { cx: number; cz: number; version: number }
-interface ChunkMeshes { opaque: THREE.Mesh | null; translucent: THREE.Mesh | null }
+interface WaitingJob {
+  cx: number;
+  cz: number;
+  version: number;
+}
+interface ChunkMeshes {
+  opaque: THREE.Mesh | null;
+  translucent: THREE.Mesh | null;
+}
+interface FlightInfo {
+  worker: Worker;
+  since: number;
+}
 
 /** 注入图集 UV 重映射 shader：uv 为“格内局部坐标”，aTile 为图集格号 */
 const MAP_FRAG = /* glsl */ `
@@ -39,7 +50,10 @@ const MAP_FRAG = /* glsl */ `
 function patchAtlasUv(mat: THREE.MeshBasicMaterial): void {
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aTile;\nvarying float vTile;')
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute float aTile;\nvarying float vTile;',
+      )
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvTile = aTile;');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vTile;')
@@ -54,13 +68,40 @@ export class ChunkManager {
   private workers: Worker[] = [];
   private idle: Worker[] = [];
   private waiting = new Map<string, WaitingJob>();
-  private inFlight = new Map<string, { version: number; worker: Worker; since: number }>();
+  private inFlight = new Map<
+    string,
+    { version: number; worker: Worker; since: number }
+  >();
+  private genInFlight = new Map<string, FlightInfo>();
   private versions = new Map<string, number>();
-  private results: MeshJobOut[] = [];
+  private results: JobOut[] = [];
   private meshes = new Map<string, ChunkMeshes>();
   private workerDefs: (BlockDef | null)[];
   /** Worker 异常计数（诊断用） */
   workerErrors = 0;
+  /** 当前渲染距离（区块），运行时可调 */
+  private rd = RENDER_DIST;
+  /** 平滑光照（AO）开关，新 Worker 初始化时同步 */
+  private aoFlag = true;
+
+  /** 运行时调整渲染距离（2~32），下一帧 ensure 立即按新半径加载/卸载 */
+  setRenderDist(r: number): void {
+    const v = Math.max(2, Math.min(32, Math.round(r)));
+    if (v === this.rd) return;
+    this.rd = v;
+    this.lastEnsureCX = Number.NaN; // 强制重新 ensure
+    this.lastEnsureCZ = Number.NaN;
+  }
+
+  /** 平滑光照开关：通知所有 Worker 并重网格化全部已加载区块（与 MC 切换时重载一致） */
+  setSmoothLighting(on: boolean): void {
+    this.aoFlag = on;
+    for (const w of this.workers) w.postMessage({ type: 'config', ao: on });
+    for (const key of [...this.world.chunks.keys()]) {
+      const [cx, cz] = key.split(',').map(Number);
+      this.queueMesh(cx, cz);
+    }
+  }
 
   private genQueue: { cx: number; cz: number; d2: number }[] = [];
   private genSet = new Set<string>();
@@ -74,7 +115,9 @@ export class ChunkManager {
     atlas: AtlasResult,
     defs: (BlockDef | null)[],
     /** 存档覆盖：返回玩家修改过的区块数据则跳过地形生成 */
-    private provide: ((cx: number, cz: number) => Uint8Array | null) | null = null,
+    private provide:
+      | ((cx: number, cz: number) => Uint8Array | null)
+      | null = null,
   ) {
     this.opaqueMat = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -93,7 +136,10 @@ export class ChunkManager {
     patchAtlasUv(this.waterMat);
 
     this.workerDefs = defs;
-    const count = Math.max(2, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
+    const count = Math.max(
+      2,
+      Math.min(4, (navigator.hardwareConcurrency || 4) - 1),
+    );
     for (let i = 0; i < count; i++) {
       const w = this.spawnWorker();
       this.workers.push(w);
@@ -101,24 +147,38 @@ export class ChunkManager {
     }
   }
 
-  /** 创建网格化 Worker；异常时回收其在飞任务并更换新 Worker（防管道卡死） */
+  /** 创建区块 Worker；异常时回收其在飞任务并更换新 Worker（防管道卡死） */
   private spawnWorker(): Worker {
-    const w = new Worker(new URL('./mesher-worker.ts', import.meta.url), { type: 'module' });
-    w.postMessage({ type: 'init', defs: this.workerDefs });
-    w.onmessage = (e: MessageEvent<MeshJobOut>) => {
-      const m = e.data;
-      this.inFlight.delete(chunkKey(m.cx, m.cz));
-      this.results.push(m);
+    const w = new Worker(new URL('./mesher-worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    w.postMessage({
+      type: 'init',
+      defs: this.workerDefs,
+      seed: this.worldGen.seed,
+      ao: this.aoFlag,
+    });
+    w.onmessage = (e: MessageEvent<JobOut>) => {
+      this.results.push(e.data);
       if (!this.idle.includes(w)) this.idle.push(w);
     };
     w.onerror = (e) => {
       this.workerErrors++;
-      console.error('[mc] 网格化 Worker 异常，重新排队任务并更换 Worker', e.message);
+      console.error(
+        '[mc] 区块 Worker 异常，重新排队任务并更换 Worker',
+        e.message,
+      );
       for (const [key, info] of [...this.inFlight]) {
         if (info.worker === w) {
           this.inFlight.delete(key);
           const [cx, cz] = key.split(',').map(Number);
           this.waiting.set(key, { cx, cz, version: info.version });
+        }
+      }
+      for (const [key, info] of [...this.genInFlight]) {
+        if (info.worker === w) {
+          this.genInFlight.delete(key);
+          this.requeueGen(key);
         }
       }
       this.workers = this.workers.filter((x) => x !== w);
@@ -129,6 +189,14 @@ export class ChunkManager {
       this.idle.push(nw);
     };
     return w;
+  }
+
+  /** 把生成任务放回队首（失败/超时/Worker 异常时） */
+  private requeueGen(key: string): void {
+    if (this.world.chunks.has(key) || this.genSet.has(key)) return;
+    const [cx, cz] = key.split(',').map(Number);
+    this.genSet.add(key);
+    this.genQueue.unshift({ cx, cz, d2: 0 });
   }
 
   /** 方块编辑后：重建本区块 + 边界相邻区块 */
@@ -160,11 +228,11 @@ export class ChunkManager {
         const ccz = Math.floor(wz / 16);
         const chunk = this.world.chunks.get(chunkKey(ccx, ccz));
         if (!chunk) continue;
-        let src = (wx - ccx * 16) + 16 * (wz - ccz * 16);
+        let src = wx - ccx * 16 + 16 * (wz - ccz * 16);
         let dst = lx + 1 + PAD_X * (lz + 1);
         for (let y = 0; y < H; y++) {
           out[dst] = chunk[src];
-          src += 256;          // 16×16
+          src += 256; // 16×16
           dst += PAD_X * PAD_Z;
         }
       }
@@ -180,7 +248,7 @@ export class ChunkManager {
     this.lastEnsureCX = pcx;
     this.lastEnsureCZ = pcz;
 
-    const R = RENDER_DIST;
+    const R = this.rd;
     for (let dz = -R; dz <= R; dz++) {
       for (let dx = -R; dx <= R; dx++) {
         const d2 = dx * dx + dz * dz;
@@ -189,7 +257,7 @@ export class ChunkManager {
         const cz = pcz + dz;
         const key = chunkKey(cx, cz);
         if (!this.world.hasChunk(cx, cz)) {
-          if (!this.genSet.has(key)) {
+          if (!this.genSet.has(key) && !this.genInFlight.has(key)) {
             this.genSet.add(key);
             this.genQueue.push({ cx, cz, d2 });
           }
@@ -208,6 +276,7 @@ export class ChunkManager {
         this.world.deleteChunk(cx, cz);
         this.genSet.delete(key);
         this.waiting.delete(key);
+        this.versions.delete(key); // 防版本表无限增长
         this.disposeMeshes(key);
       }
     }
@@ -226,7 +295,12 @@ export class ChunkManager {
     }
   }
 
-  private makeMesh(g: PackedGeometry, cx: number, cz: number, mat: THREE.Material): THREE.Mesh {
+  private makeMesh(
+    g: PackedGeometry,
+    cx: number,
+    cz: number,
+    mat: THREE.Material,
+  ): THREE.Mesh {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2));
@@ -242,35 +316,47 @@ export class ChunkManager {
     return mesh;
   }
 
-  /**
-   * 每帧驱动。genBudget：本帧最多生成多少区块；applyBudget：最多上传多少网格。
-   * 返回加载进度 [0,1]（仅启动阶段使用）。
-   */
-  update(px: number, pz: number, genBudget: number, applyBudget: number): number {
-    this.ensure(px, pz);
+  /** 生成结果落地：写入世界并触发本区块 + 四邻重网格化 */
+  private settleGen(cx: number, cz: number, data: Uint8Array): void {
+    this.world.setChunk(cx, cz, data);
+    this.queueMesh(cx, cz);
+    this.queueMesh(cx - 1, cz);
+    this.queueMesh(cx + 1, cz);
+    this.queueMesh(cx, cz - 1);
+    this.queueMesh(cx, cz + 1);
+  }
 
-    // 1) 地形生成（主线程，限帧预算）
-    let n = 0;
-    while (n < genBudget && this.genQueue.length > 0) {
+  /**
+   * 每帧驱动。applyBudget：最多上传多少网格；
+   * wantProgress 为 true 时才统计加载进度（游戏中跳过该循环）。
+   */
+  update(
+    px: number,
+    pz: number,
+    applyBudget: number,
+    wantProgress = false,
+  ): number {
+    this.ensure(px, pz);
+    const now = performance.now();
+
+    // 1) 地形生成：存档覆盖直接落地，其余派发给空闲 Worker
+    while (this.idle.length > 0 && this.genQueue.length > 0) {
       const job = this.genQueue.shift()!;
       const key = chunkKey(job.cx, job.cz);
       this.genSet.delete(key);
-      if (!this.world.hasChunk(job.cx, job.cz)) {
-        // 优先使用存档中修改过的区块，否则按种子重新生成
-        const data = this.provide?.(job.cx, job.cz) ?? this.worldGen.generateChunk(job.cx, job.cz);
-        this.world.setChunk(job.cx, job.cz, data);
-        this.queueMesh(job.cx, job.cz);
-        // 邻区块边界会因此变化，重网格化
-        this.queueMesh(job.cx - 1, job.cz);
-        this.queueMesh(job.cx + 1, job.cz);
-        this.queueMesh(job.cx, job.cz - 1);
-        this.queueMesh(job.cx, job.cz + 1);
+      if (this.world.hasChunk(job.cx, job.cz) || this.genInFlight.has(key))
+        continue;
+      const saved = this.provide?.(job.cx, job.cz) ?? null;
+      if (saved) {
+        this.settleGen(job.cx, job.cz, saved);
+        continue;
       }
-      n++;
+      const w = this.idle.pop()!;
+      this.genInFlight.set(key, { worker: w, since: now });
+      w.postMessage({ type: 'gen', cx: job.cx, cz: job.cz });
     }
 
     // 1.5) 回收卡死任务：在飞超过 10s 视为丢失，重新排队（Worker 静默异常的兜底）
-    const now = performance.now();
     for (const [key, info] of [...this.inFlight]) {
       if (now - info.since > 10_000) {
         this.inFlight.delete(key);
@@ -280,13 +366,66 @@ export class ChunkManager {
         }
       }
     }
+    for (const [key, info] of [...this.genInFlight]) {
+      if (now - info.since > 10_000) {
+        this.genInFlight.delete(key);
+        this.requeueGen(key);
+      }
+    }
 
-    // 2) 派发网格任务给空闲 Worker（按距玩家优先级）
+    // 2) 应用结果：生成数据即刻落地；网格结果限帧预算上传
+    let applied = 0;
+    let i = 0;
+    while (i < this.results.length) {
+      const r = this.results[i];
+      if (r.type === 'gen') {
+        this.results.splice(i, 1);
+        const key = chunkKey(r.cx, r.cz);
+        this.genInFlight.delete(key);
+        if (r.data.byteLength === 0) {
+          this.requeueGen(key); // 生成失败，重试
+        } else if (!this.world.hasChunk(r.cx, r.cz)) {
+          this.settleGen(r.cx, r.cz, new Uint8Array(r.data));
+        }
+        continue;
+      }
+      if (applied >= applyBudget) break;
+      this.results.splice(i, 1);
+      const key = chunkKey(r.cx, r.cz);
+      this.inFlight.delete(key);
+      if (!this.world.hasChunk(r.cx, r.cz)) continue;
+      if (this.versions.get(key) !== r.version) {
+        this.queueMesh(r.cx, r.cz); // 飞行期间数据又变了，重建
+        continue;
+      }
+      this.disposeMeshes(key);
+      const entry: ChunkMeshes = { opaque: null, translucent: null };
+      if (r.opaque) {
+        entry.opaque = this.makeMesh(r.opaque, r.cx, r.cz, this.opaqueMat);
+        this.scene.add(entry.opaque);
+      }
+      if (r.translucent) {
+        entry.translucent = this.makeMesh(
+          r.translucent,
+          r.cx,
+          r.cz,
+          this.waterMat,
+        );
+        this.scene.add(entry.translucent);
+      }
+      this.meshes.set(key, entry);
+      applied++;
+    }
+
+    // 3) 派发网格任务给空闲 Worker（按距玩家优先级）
     if (this.idle.length > 0 && this.waiting.size > 0) {
       const pcx = Math.floor(px / 16);
       const pcz = Math.floor(pz / 16);
       const sorted = [...this.waiting.values()].sort(
-        (a, b) => (a.cx - pcx) ** 2 + (a.cz - pcz) ** 2 - ((b.cx - pcx) ** 2 + (b.cz - pcz) ** 2),
+        (a, b) =>
+          (a.cx - pcx) ** 2 +
+          (a.cz - pcz) ** 2 -
+          ((b.cx - pcx) ** 2 + (b.cz - pcz) ** 2),
       );
       for (const job of sorted) {
         if (this.idle.length === 0) break;
@@ -303,39 +442,20 @@ export class ChunkManager {
         this.waiting.delete(key);
         this.inFlight.set(key, { version: job.version, worker: w, since: now });
         const data = this.buildPadded(job.cx, job.cz);
-        w.postMessage({ type: 'mesh', cx: job.cx, cz: job.cz, version: job.version, data }, [data]);
+        w.postMessage(
+          { type: 'mesh', cx: job.cx, cz: job.cz, version: job.version, data },
+          [data],
+        );
       }
     }
 
-    // 3) 应用结果（限帧预算，防卡顿）
-    let applied = 0;
-    while (applied < applyBudget && this.results.length > 0) {
-      const r = this.results.shift()!;
-      const key = chunkKey(r.cx, r.cz);
-      if (!this.world.hasChunk(r.cx, r.cz)) continue;
-      if (this.versions.get(key) !== r.version) {
-        this.queueMesh(r.cx, r.cz); // 飞行期间数据又变了，重建
-        continue;
-      }
-      this.disposeMeshes(key);
-      const entry: ChunkMeshes = { opaque: null, translucent: null };
-      if (r.opaque) {
-        entry.opaque = this.makeMesh(r.opaque, r.cx, r.cz, this.opaqueMat);
-        this.scene.add(entry.opaque);
-      }
-      if (r.translucent) {
-        entry.translucent = this.makeMesh(r.translucent, r.cx, r.cz, this.waterMat);
-        this.scene.add(entry.translucent);
-      }
-      this.meshes.set(key, entry);
-      applied++;
-    }
-
-    // 4) 加载进度（需要的目标区块中，已生成+已出网格的比例）
+    // 4) 加载进度（仅启动阶段统计）
+    if (!wantProgress) return 1;
     const pcx = Math.floor(px / 16);
     const pcz = Math.floor(pz / 16);
-    const R = RENDER_DIST;
-    let total = 0, done = 0;
+    const R = this.rd;
+    let total = 0,
+      done = 0;
     for (let dz = -R; dz <= R; dz++) {
       for (let dx = -R; dx <= R; dx++) {
         const d2 = dx * dx + dz * dz;

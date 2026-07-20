@@ -645,9 +645,8 @@ function startGame(
         }
       }
     };
-    // 加载阶段挂起邻区重网格化：区块落地不再触发四邻反复重建，
-    // 待世界稳定（加载完成）后统一按最新版本重排，每区块只网格化一次。
-    d.cm.setDeferNeighbors(true);
+    // 懒加载：玩家永远不去的方向的 chunk 永远不进入生成队列。
+    // 维度 ChunkManager 默认行为就行，ensure() 每帧只排玩家行进方向 ±R 圈。
   }
 
   // ---- 附魔台：右键打开 UI，消耗经验+青金石给装备附魔 ----
@@ -743,9 +742,10 @@ function startGame(
   scene.add(crackMesh);
 
   // ---- 交互状态 ----
+  // 出生点近场 ±3 chunk (共 49) 全部落地视为可玩。真正的"懒加载"模型：
+  // 远处地形在游戏中按行进方向流式入队，玩家永不踏足之处永远不生。
   let state: GameState = 'loading';
-  // 加载是否仍处于“挂起邻区网格化”的第一阶段（地形生成）
-  let deferringLoad = true;
+  let spawnReadyHandled = false;
   let attackHeld = false;
   let useHeld = false;
   let useCooldown = 0;
@@ -2015,29 +2015,42 @@ function startGame(
     debugPanel.tickFrame(dt);
     const hidden = document.hidden;
 
+    // 加载阶段：等玩家初始 ~3×3 可见范围内 chunk 全部落地即可进入游戏，
+    // 远处地形保持 lazy —— 玩家走不到永远不生（性能旁路）。
+    // 进度按"出生点 ±3 chunk 已落地"计算，让玩家尽快进入。
     if (state === 'loading') {
       const cm = cur().cm;
-      const p = cm.update(body.x, body.z, 24, true);
+      // ensureRadius=3 等同"出生点 ±3 圈 (49 chunk)"——出生点近场即可玩
+      cm.update(body.x, body.z, 24, true, 0, 0, 3);
       // 加载期地图采样节流：每帧限量消化落地高峰排队的区块,主线程不被一次性打断
       worldMap.drainQueue(6);
-      if (p >= 1) {
-        if (deferringLoad) {
-          // 第一阶段完成（全部地形已生成）：放开网格化，进入第二阶段
-          deferringLoad = false;
-          for (const dim of ALL_DIMS) dims[dim].cm.setDeferNeighbors(false);
-          startScreen.setProgress('正在构建网格…', 0);
-        } else {
-          // 第二阶段完成（网格化补齐）：可进入游戏
-          state = 'ready';
-          startScreen.setReady(enterWorld);
+      // 出生点近场 3 圈 49 chunk 全部可见 → 视为可玩
+      const spawnPcx = Math.floor(body.x / 16);
+      const spawnPcz = Math.floor(body.z / 16);
+      let allReady = true;
+      for (let dz = -3; dz <= 3 && allReady; dz++) {
+        for (let dx = -3; dx <= 3 && allReady; dx++) {
+          if (!cm.worldHasChunk(spawnPcx + dx, spawnPcz + dz)) allReady = false;
         }
+      }
+      // 出生点近场首次渲染完成即解锁进入（剩余地形在游戏中流式）
+      if (!spawnReadyHandled && allReady) {
+        spawnReadyHandled = true;
+        // 出生点就绪后立即允许进入（不必等网格完成：mesh 在 flying/player 下继续流式）
+        state = 'ready';
+        startScreen.setReady(enterWorld);
       } else {
-        startScreen.setProgress(
-          deferringLoad
-            ? `正在生成世界… ${Math.round(p * 100)}%`
-            : `正在构建网格… ${Math.round(p * 100)}%`,
-          p,
-        );
+        // 给个 0~95% 假进度，仅供加载界面有动画（不再等待全视距）
+        const total = 49;
+        let done = 0;
+        const w = cm.getWorldSnapshot();
+        for (let dz = -3; dz <= 3; dz++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            if (w.has(spawnPcx + dx, spawnPcz + dz)) done++;
+          }
+        }
+        const p = done / total;
+        startScreen.setProgress(`正在生成出生点周围地形… ${Math.round(p * 100)}%`, p);
       }
       sky.update(dt, camera, []);
       cm.dayUniform.value = sky.daylight;
@@ -2390,7 +2403,12 @@ function startGame(
     }
 
     // 区块流式更新（游戏中保守上传预算；进度统计仅加载阶段开启）
-    cur().cm.update(body.x, body.z, state === 'playing' ? 6 : 24, false);
+    // 传入当前帧速度方向做前瞻排程——前进方向多 1 圈，逆方向少 1 圈。
+    // 懒加载：实际渲染距离 = RD（视觉/雾），但地形/网格生成范围 = min(RD, 3)：
+    // 玩家不去的地方永远不存、不占内存。RD 调到 ≥10 后玩家主动拉远可视范围。
+    const renderRD = cur().cm.rd;
+    const ensureR = Math.min(renderRD, 3);
+    cur().cm.update(body.x, body.z, state === 'playing' ? 6 : 24, false, body.vx, body.vz, ensureR);
     // 游戏中继续消化排队的地图采样（玩家移动触发的新区块落地），每帧限量防尖刺
     worldMap.drainQueue(state === 'playing' ? 2 : 8);
 

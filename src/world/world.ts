@@ -73,6 +73,9 @@ export class World {
     }
 
     // 2) 邻区边缘光回流：邻区边缘格光 ≥2 则向本区块泛洪
+    // 优化：先看邻区 lightCount，0 → 完全无光 → 8K 扫描跳过；非 0 才逐格扫边
+    // 村庄/要塞/torch 重区每次都触发 = 4 chunks × 4 edges × 8K cells × map ops
+    // = 主线程一帧 50ms+ 的卡顿主因之一；快速 0-count 检测是最便宜的过滤。
     const faces: readonly [number, number, number, number][] = [
       // [邻区 dx, 邻区 dz, 邻区边缘 lx/lz, 本区块边缘 lx/lz]
       [-1, 0, CHUNK_X - 1, 0],
@@ -81,6 +84,9 @@ export class World {
       [0, 1, 0, CHUNK_Z - 1],
     ];
     for (const [dx, dz, nEdge, myEdge] of faces) {
+      const nSkey = chunkKey(cx + dx, cz + dz);
+      // lightCount 为 0 表示邻区整块无任何光源（典型多数情况）→ 跳过 8K 扫描
+      if ((this.lightCount.get(nSkey) ?? 0) === 0) continue;
       const nLight = this.lightFast.get(packKey(cx + dx, cz + dz));
       if (!nLight) continue;
       const alongX = dx !== 0; // 邻区在 x 方向：遍历其 lx=nEdge 的面

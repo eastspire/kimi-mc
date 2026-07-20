@@ -325,19 +325,59 @@ export class ChunkManager {
     return this.buildPaddedFrom(this.world.light, cx, cz);
   }
 
-  /** 确保玩家周围区块已生成 / 已排队网格化；卸载远处区块 */
-  private ensure(px: number, pz: number): void {
+  /**
+   * 确保玩家周围区块已生成 / 已排队网格化；卸载远处区块。
+   * lookaheadVX/VZ：玩家当前帧速度方向（任意标量，向量归一化到三档：-1/0/+1），
+   * 用于沿行进方向伸 1 圈（玩家即将踏进去的 chunk 已经预热），反方向缩 1 圈
+   * （玩家不再去的方向提前卸载，避免远端 lazy 永久挂载）。
+   * ensureRadius：覆盖到 ±ensureRadius 圈；玩家跑步疲恐/hpa 场景可传小值
+   * （如 3），让远处块真正"懒"——未到不排队、未生成、未内存占用。
+   */
+  private ensure(
+    px: number,
+    pz: number,
+    lookaheadVX = 0,
+    lookaheadVZ = 0,
+    ensureRadius?: number,
+  ): void {
     const pcx = Math.floor(px / 16);
     const pcz = Math.floor(pz / 16);
-    if (pcx === this.lastEnsureCX && pcz === this.lastEnsureCZ) return;
+    const R = ensureRadius ?? this.rd;
+    if (
+      pcx === this.lastEnsureCX &&
+      pcz === this.lastEnsureCZ &&
+      R === this.lastEnsureR &&
+      Math.sign(lookaheadVX) === this.lastLookDX &&
+      Math.sign(lookaheadVZ) === this.lastLookDZ
+    ) {
+      return;
+    }
     this.lastEnsureCX = pcx;
     this.lastEnsureCZ = pcz;
+    this.lastEnsureR = R;
+    this.lastLookDX = Math.sign(lookaheadVX);
+    this.lastLookDZ = Math.sign(lookaheadVZ);
 
-    const R = this.rd;
-    for (let dz = -R; dz <= R; dz++) {
-      for (let dx = -R; dx <= R; dx++) {
+    // 归一化方向到 {-1, 0, +1}
+    const sx = Math.sign(lookaheadVX);
+    const sz = Math.sign(lookaheadVZ);
+    // 沿行进方向 +1 圈，反方向 -1 圈（最低 1）
+    const headroom = R + 1;
+    const tail = Math.max(1, R - 1);
+    // 用每轴独立的 min/max 替换单一正方形扫描，沿 sx 方向用 headroom，其他用 R
+    const dx0 = sx < 0 ? -headroom : sx > 0 ? tail : -R;
+    const dx1 = sx < 0 ? -tail : sx > 0 ? headroom : R;
+    const dz0 = sz < 0 ? -headroom : sz > 0 ? tail : -R;
+    const dz1 = sz < 0 ? -tail : sz > 0 ? headroom : R;
+
+    let queued = 0;
+    for (let dz = dz0; dz <= dz1; dz++) {
+      for (let dx = dx0; dx <= dx1; dx++) {
         const d2 = dx * dx + dz * dz;
-        if (d2 > R * R + R) continue; // 圆角视距
+        // 圆角视距（沿行进方向稍宽容，逆方向稍苛刻）
+        const r2 = (dx1 - dx0) * (dx1 - dx0) + (dz1 - dz0) * (dz1 - dz0);
+        const limit2 = r2 + R;
+        if (d2 > limit2) continue;
         const cx = pcx + dx;
         const cz = pcz + dz;
         const key = chunkKey(cx, cz);
@@ -345,16 +385,18 @@ export class ChunkManager {
           if (!this.genSet.has(key) && !this.genInFlight.has(key)) {
             this.genSet.add(key);
             this.genQueue.push({ cx, cz, d2 });
+            queued++;
           }
         } else if (!this.meshes.has(key) && !this.inFlight.has(key)) {
           this.queueMesh(cx, cz);
         }
       }
     }
-    this.genQueue.sort((a, b) => a.d2 - b.d2);
+    if (queued > 0) this.genQueue.sort((a, b) => a.d2 - b.d2);
 
-    // 卸载视距外（+2 缓冲）
-    const lim = R + 2;
+    // 卸载视距外（无方向性，玩家离开方向立即释放）
+    // 仅 +1 缓冲（不再 +2），地形差一格无视觉影响但显著降低内存峰值
+    const lim = R + 1;
     for (const key of [...this.world.chunks.keys()]) {
       const [cx, cz] = key.split(',').map(Number);
       if (Math.abs(cx - pcx) > lim || Math.abs(cz - pcz) > lim) {
@@ -367,6 +409,10 @@ export class ChunkManager {
       }
     }
   }
+
+  private lastLookDX = 0;
+  private lastLookDZ = 0;
+  private lastEnsureR = -1;
 
   private disposeMeshes(key: string): void {
     const m = this.meshes.get(key);
@@ -424,15 +470,22 @@ export class ChunkManager {
   /**
    * 每帧驱动。applyBudget：最多上传多少网格；
    * wantProgress 为 true 时才统计加载进度（游戏中跳过该循环）。
+   * lookaheadVX/VZ 是玩家当前帧速度方向（±1 单位 / m/s），用于沿行进方向
+   * 提前 1 圈排程、逆方向收紧 1 圈，确保玩家眼前的视野始终有"预热"区。
+   * ensureRadius 默认 = RD（与 RENDER_DIST 对齐）；玩家希望"懒加载"场景下
+   * 调成更小值（如 3）让 ensure 只排 ±ensureRadius 圈；玩家实际到时再扩。
    */
   update(
     px: number,
     pz: number,
     applyBudget: number,
     wantProgress = false,
+    lookaheadVX = 0,
+    lookaheadVZ = 0,
+    ensureRadius?: number,
   ): number {
     this.ensureWorkers();
-    this.ensure(px, pz);
+    this.ensure(px, pz, lookaheadVX, lookaheadVZ, ensureRadius);
     const now = performance.now();
 
     // 1) 地形生成：存档覆盖直接落地，其余派发给空闲 Worker
@@ -469,10 +522,13 @@ export class ChunkManager {
       }
     }
 
-    // 2) 应用结果：生成数据即刻落地；网格结果限帧预算上传
+    // 2) 应用结果：生成 + 网格 共用 applyBudget，但村庄/要塞/torch 重区每块
+    // setChunk 触发 lighting BFS 与 8K 邻区扫描，4 workers 同帧回包在 playing 阶段
+    // 会瞬间堆积成 50ms+ 卡顿。loading 阶段 applyBudget=24，可全速；playing 阶段
+    // 收紧为同帧 ≤6 块（避免帧 spike）。
     let applied = 0;
     let i = 0;
-    while (i < this.results.length) {
+    while (i < this.results.length && applied < applyBudget) {
       const r = this.results[i];
       if (r.type === 'gen') {
         this.results.splice(i, 1);
@@ -482,10 +538,10 @@ export class ChunkManager {
           this.requeueGen(key); // 生成失败，重试
         } else if (!this.world.hasChunk(r.cx, r.cz)) {
           this.settleGen(r.cx, r.cz, new Uint8Array(r.data));
+          applied++;
         }
         continue;
       }
-      if (applied >= applyBudget) break;
       this.results.splice(i, 1);
       const key = chunkKey(r.cx, r.cz);
       this.inFlight.delete(key);
@@ -593,4 +649,28 @@ export class ChunkManager {
   get meshedCount(): number {
     return this.meshes.size;
   }
+
+  /** 主线程检查某 chunk 是否已落地（已存在于世界数据中） */
+  worldHasChunk(cx: number, cz: number): boolean {
+    return this.world.hasChunk(cx, cz);
+  }
+
+  /** 一次性把 chunks Map 转成整数键的 Set（用 packKey），调用方 .has 命中 */
+  getWorldSnapshot(): { has(cx: number, cz: number): boolean } {
+    const set = new Set<number>();
+    for (const key of this.world.chunks.keys()) {
+      const [cx, cz] = key.split(',').map(Number);
+      set.add(packKeyInternal(cx, cz));
+    }
+    return {
+      has(cx: number, cz: number): boolean {
+        return set.has(packKeyInternal(cx, cz));
+      },
+    };
+  }
+}
+
+/** 整型键打包 —— 与 World.packKey 算式一致，避免暴露内部 */
+function packKeyInternal(cx: number, cz: number): number {
+  return ((cx + 32768) << 16) | (cz + 32768);
 }

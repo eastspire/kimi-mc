@@ -103,7 +103,7 @@ export class ChunkManager {
   /** Worker 异常计数（诊断用） */
   workerErrors = 0;
   /** 当前渲染距离（区块），运行时可调 */
-  private rd = RENDER_DIST;
+  public rd = RENDER_DIST;
   /** 平滑光照（AO）开关，新 Worker 初始化时同步 */
   private aoFlag = true;
 

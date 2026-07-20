@@ -483,6 +483,29 @@ function startGame(
     controls.yaw = yaw;
     controls.pitch = pitch;
   };
+  // 调试钩子：在世界坐标直接放置当前 hotbar 槽位方块（绕过点击）
+  (
+    window as unknown as {
+      __placeAt: (x: number, y: number, z: number) => void;
+    }
+  ).__placeAt = (x, y, z) => {
+    const slot = hotbar.current;
+    if (!slot.block) return;
+    applyEdit(x, y, z, slot.block.def.id);
+  };
+  // 调试钩子：读世界某坐标的方块 id
+  (
+    window as unknown as {
+      __getBlock: (x: number, y: number, z: number) => number;
+    }
+  ).__getBlock = (x, y, z) => cur().world.getBlock(x, y, z);
+  // 调试钩子：强制选热栏槽位（绕过 controls 的 pointer-lock gate）
+  (window as unknown as { __pickHotbar: (i: number) => void }).__pickHotbar = (
+    i,
+  ) => hotbar.select(i);
+  // 调试钩子：读当前 hotbar 选中块的 id
+  (window as unknown as { __hotbarId: () => number }).__hotbarId = () =>
+    hotbar.current.block?.def.id ?? 0;
   // 性能基准：同步连跑 n 帧返回 FPS（用于被系统遮挡导致 rAF 冻结的环境）
   (window as unknown as { __bench: (n: number) => number }).__bench = (n) => {
     const t0 = performance.now();
@@ -635,11 +658,19 @@ function startGame(
       const bz = cz * 16;
       for (const [key, st] of [...furnaces]) {
         if (
-          st.x >= bx && st.x < bx + 16 &&
-          st.z >= bz && st.z < bz + 16 &&
-          !st.input.block && !st.input.food && !st.input.tool &&
-          !st.fuel.block && !st.fuel.food && !st.fuel.tool &&
-          !st.output.block && !st.output.food && !st.output.tool
+          st.x >= bx &&
+          st.x < bx + 16 &&
+          st.z >= bz &&
+          st.z < bz + 16 &&
+          !st.input.block &&
+          !st.input.food &&
+          !st.input.tool &&
+          !st.fuel.block &&
+          !st.fuel.food &&
+          !st.fuel.tool &&
+          !st.output.block &&
+          !st.output.food &&
+          !st.output.tool
         ) {
           furnaces.delete(key);
         }
@@ -852,16 +883,14 @@ function startGame(
     Number.isFinite(savedRd) && savedRd >= 4 && savedRd <= 16
       ? savedRd
       : RENDER_DIST;
-  for (const dim of ALL_DIMS)
-    dims[dim].cm.setRenderDist(initRd);
+  for (const dim of ALL_DIMS) dims[dim].cm.setRenderDist(initRd);
   sky.setRenderDist(initRd);
   rdSlider.value = String(initRd);
   rdValue.textContent = String(initRd);
   rdSlider.oninput = () => {
     const v = Number(rdSlider.value);
     rdValue.textContent = String(v);
-    for (const dim of ALL_DIMS)
-      dims[dim].cm.setRenderDist(v);
+    for (const dim of ALL_DIMS) dims[dim].cm.setRenderDist(v);
     sky.setRenderDist(v);
     localStorage.setItem('mc-render-dist', String(v));
   };
@@ -1069,7 +1098,13 @@ function startGame(
     const tz = Math.floor(nz);
     // 各维度起始搜索高度
     const startY =
-      target === 'nether' ? 70 : target === 'end' ? 80 : target === 'aether' ? 100 : 90;
+      target === 'nether'
+        ? 70
+        : target === 'end'
+          ? 80
+          : target === 'aether'
+            ? 100
+            : 90;
     // 先确保目标区块已生成（同步查 findSpawnY 前需有方块）
     dims[target].cm.update(nx, nz, 24, false);
     // 向下找第一个"脚+头为空气/可站立"且下方实心处
@@ -1263,11 +1298,9 @@ function startGame(
   const savedAo = localStorage.getItem('mc-smooth-lighting');
   const initAo = savedAo === null ? true : savedAo === '1';
   aoCheck.checked = initAo;
-  for (const dim of ALL_DIMS)
-    dims[dim].cm.setSmoothLighting(initAo);
+  for (const dim of ALL_DIMS) dims[dim].cm.setSmoothLighting(initAo);
   aoCheck.onchange = () => {
-    for (const dim of ALL_DIMS)
-      dims[dim].cm.setSmoothLighting(aoCheck.checked);
+    for (const dim of ALL_DIMS) dims[dim].cm.setSmoothLighting(aoCheck.checked);
     localStorage.setItem('mc-smooth-lighting', aoCheck.checked ? '1' : '0');
   };
 
@@ -1786,7 +1819,14 @@ function startGame(
     // 近战攻击末影龙：准星命中龙（大型宽松判定）
     if (attackHeld && dragon && !dragon.dying) {
       const reach = 5;
-      if (dragon.hitTest(eye.x + tmpDir.x * 3, eye.y + tmpDir.y * 3, eye.z + tmpDir.z * 3, reach)) {
+      if (
+        dragon.hitTest(
+          eye.x + tmpDir.x * 3,
+          eye.y + tmpDir.y * 3,
+          eye.z + tmpDir.z * 3,
+          reach,
+        )
+      ) {
         const heldTool = hotbar.current.tool?.def ?? null;
         const sharpLvl = hotbar.current.tool?.ench?.sharpness ?? 0;
         const melee = (heldTool?.melee ?? 1) + sharpnessBonus(sharpLvl);
@@ -1865,12 +1905,7 @@ function startGame(
       } else if (hitDef && hitDef.name === 'end_portal_frame') {
         // 末地传送门框架：手持末影珍珠右键 → 嵌眼激活（MC 用末影之眼）
         if (curTool?.id === 'ender_pearl') {
-          applyEdit(
-            currentHit!.x,
-            currentHit!.y,
-            currentHit!.z,
-            idEndFrameEye,
-          );
+          applyEdit(currentHit!.x, currentHit!.y, currentHit!.z, idEndFrameEye);
           if (gameMode === 'survival') consumeHeldMaterial('ender_pearl');
           sfx.playPlace();
           hud.showItemName('传送门框架已激活');
@@ -2050,7 +2085,10 @@ function startGame(
           }
         }
         const p = done / total;
-        startScreen.setProgress(`正在生成出生点周围地形… ${Math.round(p * 100)}%`, p);
+        startScreen.setProgress(
+          `正在生成出生点周围地形… ${Math.round(p * 100)}%`,
+          p,
+        );
       }
       sky.update(dt, camera, []);
       cm.dayUniform.value = sky.daylight;
@@ -2408,7 +2446,15 @@ function startGame(
     // 玩家不去的地方永远不存、不占内存。RD 调到 ≥10 后玩家主动拉远可视范围。
     const renderRD = cur().cm.rd;
     const ensureR = Math.min(renderRD, 3);
-    cur().cm.update(body.x, body.z, state === 'playing' ? 6 : 24, false, body.vx, body.vz, ensureR);
+    cur().cm.update(
+      body.x,
+      body.z,
+      state === 'playing' ? 6 : 24,
+      false,
+      body.vx,
+      body.vz,
+      ensureR,
+    );
     // 游戏中继续消化排队的地图采样（玩家移动触发的新区块落地），每帧限量防尖刺
     worldMap.drainQueue(state === 'playing' ? 2 : 8);
 

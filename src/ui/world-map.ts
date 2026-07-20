@@ -1,4 +1,5 @@
-import { CHUNK_X, CHUNK_Y, CHUNK_Z, type Dimension } from '../world/worldgen';
+import { CHUNK_X, CHUNK_Y, CHUNK_Z } from '../world/chunk-const';
+import type { Dimension } from '../world/worldgen';
 import type { World } from '../world/world';
 import type { BlockRegistry } from '../core/block-registry';
 import type { AtlasResult } from '../core/atlas';

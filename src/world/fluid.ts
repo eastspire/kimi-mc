@@ -1,6 +1,6 @@
 import { AIR } from '../core/block-registry';
 import type { World } from './world';
-import { CHUNK_Y } from './worldgen';
+import { CHUNK_Y } from './chunk-const';
 
 // ============================================================
 // 水流动模拟（MC 风格，按 tick 调度的增量扩散 + 消退）

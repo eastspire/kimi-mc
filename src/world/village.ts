@@ -1,11 +1,11 @@
-import {
-  CHUNK_X,
-  CHUNK_Y,
-  CHUNK_Z,
-  Biome,
-} from './worldgen';
+import { CHUNK_X, CHUNK_Y, CHUNK_Z } from './chunk-const';
 import type { WorldGen } from './worldgen';
 import { hash2i } from './noise';
+
+// Biome 数值镜像（与 worldgen 的 const enum 顺序一致：Plains=0, Desert=1），
+// 避免对 worldgen 的值 import 造成运行时循环依赖
+const BIOME_PLAINS = 0;
+const BIOME_DESERT = 1;
 
 // ============================================================
 // 村庄结构生成（跨区块无缝）：
@@ -49,7 +49,7 @@ function villageCenter(
   const cz = rz * REGION + oz;
   // 仅平原/沙漠生成（中心点生物群系判定）
   const biome = gen.biomeAt(cx, cz);
-  if (biome !== Biome.Plains && biome !== Biome.Desert) return null;
+  if (biome !== BIOME_PLAINS && biome !== BIOME_DESERT) return null;
   return { x: cx, z: cz };
 }
 

@@ -1,4 +1,4 @@
-import { CHUNK_X, CHUNK_Y, CHUNK_Z } from './worldgen';
+import { CHUNK_X, CHUNK_Y, CHUNK_Z } from './chunk-const';
 import { hash2i } from './noise';
 import type { WorldGen } from './worldgen';
 

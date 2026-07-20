@@ -1,5 +1,6 @@
 import { BlockRegistry, AIR } from '../core/block-registry';
 import { Noise2D, Noise3D, hash2i, hash3i } from './noise';
+import { CHUNK_X, CHUNK_Y, CHUNK_Z } from './chunk-const';
 import { applyVillage } from './village';
 import { applyStronghold } from './stronghold';
 
@@ -8,9 +9,6 @@ import { applyStronghold } from './stronghold';
 // 区块 16×128×16，海平面 32
 // ============================================================
 
-export const CHUNK_X = 16;
-export const CHUNK_Y = 128;
-export const CHUNK_Z = 16;
 export const SEA_LEVEL = 32;
 
 /**

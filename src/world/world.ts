@@ -1,5 +1,5 @@
 import { BlockRegistry, AIR } from '../core/block-registry';
-import { CHUNK_X, CHUNK_Y, CHUNK_Z } from './worldgen';
+import { CHUNK_X, CHUNK_Y, CHUNK_Z } from './chunk-const';
 import { addLight, onBlockLightChanged } from './lighting';
 
 // ============================================================

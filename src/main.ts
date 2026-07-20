@@ -34,6 +34,7 @@ import { Sfx } from './audio/sfx';
 import { Particles } from './fx/particles';
 import { MobManager } from './mob/manager';
 import { ArrowManager } from './mob/arrows';
+import { TntManager } from './world/tnt';
 import type { MobKind } from './mob/mob';
 import { DropManager } from './item/drops';
 import { XpManager } from './item/xp';
@@ -199,6 +200,10 @@ function startGame(
   const drops = new DropManager(scene, world, chunkManager.opaqueMat);
   const xpManager = new XpManager(scene, world);
   const arrowManager = new ArrowManager(scene, world);
+  // 点燃的 TNT：引信尽以 power=4 大爆炸（MC TNT 威力 4、1.14+ 全掉落）
+  const tntManager = new TntManager(scene, world, (x, y, z) =>
+    explode(x, y, z, 4, 1),
+  );
   // 生物掉落（MC 一致）：猪 1-3 生猪排；僵尸 0-2 腐肉+5 经验；羊 1 羊毛+1-2 生羊肉；
   // 牛 1-3 生牛肉+0-2 皮革；鸡 0-2 羽毛+1 生鸡肉；骷髅 0-2 骨头+0-2 箭；
   // 苦力怕 0-2 火药；被动生物 1-3 经验，敌对生物 5 经验
@@ -794,13 +799,14 @@ function startGame(
   }
 
   /**
-   * 苦力怕爆炸（MC TNT/苦力怕规则简化版）：
-   *  - 半径 3 球形破坏，基岩（hardness<0）免疫，30% 概率掉落方块实体
-   *  - 玩家距离衰减伤害：中心 15，7 格外无伤；击退方向从爆心指向玩家
+   * 爆炸（苦力怕 power=3 掉落 30%；TNT power=4 全掉落，MC 1.14+ 规则）：
+   *  - 球形破坏，基岩/水（hardness<0）免疫
+   *  - 波及的 TNT 方块不掉落，改为 0.5~1.5s 随机短引信连锁点燃（MC 10-30 tick）
+   *  - 玩家伤害 = power*5 中心线性衰减至 power*2+1 格；击退方向从爆心指向玩家
    *  - 灰烟粒子 + 爆炸音效；破坏经 applyEdit 自动入存档修改集
    */
-  function explode(x: number, y: number, z: number): void {
-    const R = 3;
+  function explode(x: number, y: number, z: number, power = 3, dropChance = 0.3): void {
+    const R = power;
     const cx = Math.floor(x);
     const cy = Math.floor(y);
     const cz = Math.floor(z);
@@ -815,9 +821,13 @@ function startGame(
           const id = world.getBlock(bx, by, bz);
           if (id === AIR) continue;
           const def = registry.def(id);
-          if (!def || def.hardness < 0) continue; // 基岩免疫
+          if (!def || def.hardness < 0) continue; // 基岩/水免疫
           applyEdit(bx, by, bz, AIR);
-          if (Math.random() < 0.3) {
+          if (def.name === 'tnt') {
+            tntManager.ignite(bx + 0.5, by + 0.5, bz + 0.5, 0.5 + Math.random());
+            continue; // 连锁引爆，不掉落方块实体
+          }
+          if (Math.random() < dropChance) {
             const drop = dropFor(def);
             if (drop) drops.spawnBlock(drop, bx + 0.5, by + 0.5, bz + 0.5);
           }
@@ -827,8 +837,9 @@ function startGame(
     const pdy = body.y + 0.9 - y;
     const pdz = body.z - z;
     const pd = Math.hypot(pdx, pdy, pdz);
-    if (pd < 7) {
-      const dmg = Math.round(15 * (1 - pd / 7));
+    const reach = power * 2 + 1;
+    if (pd < reach) {
+      const dmg = Math.round(power * 5 * (1 - pd / reach));
       if (dmg > 0) hurtPlayer(dmg, pdx, pdz);
     }
     for (let i = 0; i < 8; i++)
@@ -932,9 +943,11 @@ function startGame(
     if (gameMode === 'survival') {
       const heldTool = hotbar.current.tool?.def ?? null;
       if (canHarvest(def.name, heldTool)) {
-        // 煤矿掉煤物品（MC 一致），其余走方块掉落表
+        // 煤矿掉煤、钻石矿掉钻石（MC 一致），其余走方块掉落表
         if (def.name === 'coal_ore') {
           drops.spawnTool(TOOLS.coal, x + 0.5, y + 0.5, z + 0.5);
+        } else if (def.name === 'diamond_ore') {
+          drops.spawnTool(TOOLS.diamond, x + 0.5, y + 0.5, z + 0.5);
         } else {
           const dd = dropFor(def);
           if (dd) drops.spawnBlock(dd, x + 0.5, y + 0.5, z + 0.5);
@@ -1110,6 +1123,16 @@ function startGame(
         useCooldown = 0.3;
       } else if (hitDef && hitDef.name === 'bed') {
         trySleep(currentHit!.x, currentHit!.y, currentHit!.z);
+        useCooldown = 0.3;
+      } else if (hitDef && hitDef.name === 'tnt') {
+        // 点燃 TNT（简化：任意手持右键即点，MC 需打火石/火焰弹）
+        applyEdit(currentHit!.x, currentHit!.y, currentHit!.z, AIR);
+        tntManager.ignite(
+          currentHit!.x + 0.5,
+          currentHit!.y + 0.5,
+          currentHit!.z + 0.5,
+        );
+        sfx.playFuse();
         useCooldown = 0.3;
       } else {
         placeBlock();
@@ -1304,6 +1327,9 @@ function startGame(
         undefined,
         (x, y, z, dmg, vx, vz) => mobManager.arrowHit(x, y, z, dmg, vx, vz),
       );
+
+      // 点燃的 TNT：引信/下落/白闪，尽则经回调大爆炸（power=4）
+      tntManager.update(dt);
 
       // 掉落物：旋转/浮动/拾取（方块/食物均可入快捷栏，满则留在原地）
       drops.update(dt, body.x, body.y + 0.9, body.z, (item) => {

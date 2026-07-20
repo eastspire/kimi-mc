@@ -235,6 +235,27 @@ export const TOOLS: Record<string, ToolDef> = {
   bone: makeTool('bone', '骨头', 1, 'material', 0, true, 0, paintBone),
   arrow: makeTool('arrow', '箭', 1, 'material', 0, true, 0, paintArrow),
   gunpowder: makeTool('gunpowder', '火药', 1, 'material', 0, true, 0, paintGunpowder),
+  // ---- 钻石（可堆叠材料，钻石矿掉落物） ----
+  diamond: makeTool('diamond', '钻石', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#7ff5e8';
+    c.fillRect(6, 3, 4, 2);
+    c.fillStyle = '#4ee8d8';
+    c.fillRect(5, 5, 6, 3);
+    c.fillStyle = '#2ec8b8';
+    c.fillRect(6, 8, 4, 2);
+    c.fillRect(7, 10, 2, 2);
+    c.fillStyle = '#d8fffa';
+    c.fillRect(6, 4, 2, 1);
+  }),
+  // ---- 钻石工具（MC：速度 8、耐久 1561、层级 4 可采黑曜石） ----
+  diamond_pickaxe: makeTool('diamond_pickaxe', '钻石镐', 8, 'pickaxe', 4, false, 1561, (c) => {
+    paintHandle(c, HANDLE_1, HANDLE_2);
+    paintPickHead(c, '#4ee8d8', '#2ec8b8');
+  }),
+  diamond_axe: makeTool('diamond_axe', '钻石斧', 8, 'axe', 4, false, 1561, (c) => {
+    paintHandle(c, HANDLE_1, HANDLE_2);
+    paintAxeHead(c, '#4ee8d8', '#2ec8b8');
+  }),
   // ---- 弓（不可堆叠，MC 耐久 385）；kind 归 material（无挖掘加成），按 id 识别 ----
   bow: makeTool('bow', '弓', 1, 'material', 0, false, 385, (c) => {
     c.fillStyle = '#8a5a2b';
@@ -266,6 +287,7 @@ export const BLOCK_TOOL: Record<string, 'pickaxe' | 'axe'> = {
   iron_ore: 'pickaxe',
   gold_ore: 'pickaxe',
   diamond_ore: 'pickaxe',
+  obsidian: 'pickaxe',
   oak_log: 'axe',
   oak_planks: 'axe',
   crafting_table: 'axe',
@@ -273,8 +295,8 @@ export const BLOCK_TOOL: Record<string, 'pickaxe' | 'axe'> = {
 };
 
 /**
- * 需要镐达到最低层级才掉落的方块（MC：石头/煤矿木镐起，铁矿石镐起，金/钻石铁镐起）。
- * 不在表中的方块徒手即可采集。
+ * 需要镐达到最低层级才掉落的方块（MC：石头/煤矿木镐起，铁矿石镐起，金/钻石铁镐起，
+ * 黑曜石仅钻石镐）。不在表中的方块徒手即可采集。
  */
 export const HARVEST_TIER: Record<string, number> = {
   stone: 1,
@@ -283,6 +305,7 @@ export const HARVEST_TIER: Record<string, number> = {
   iron_ore: 2,
   gold_ore: 3,
   diamond_ore: 3,
+  obsidian: 4,
   furnace: 1,
 };
 

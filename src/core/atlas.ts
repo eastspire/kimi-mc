@@ -46,6 +46,9 @@ export const TILE_NAMES = [
   'bed_top',
   'bed_side',
   'wool',
+  'tnt_side',
+  'tnt_top',
+  'tnt_bottom',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -592,6 +595,47 @@ const PAINTERS: Record<TileName, Painter> = {
   bed_top: paintBedTop,
   bed_side: paintBedSide,
   wool: paintWool,
+  // ---- TNT：侧面红体米白腰带 + "TNT" 深色字样；顶/底同心框 ----
+  tnt_side: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#c02818', ['#a82010', '#d03820', '#901808'], 0.25);
+    ctx.fillStyle = '#701008';
+    ctx.fillRect(0, 0, 16, 1);
+    ctx.fillRect(0, 15, 16, 1);
+    ctx.fillStyle = '#f0e0c0';
+    ctx.fillRect(0, 6, 16, 4);
+    ctx.fillStyle = '#d8c8a8';
+    ctx.fillRect(0, 5, 16, 1);
+    ctx.fillRect(0, 10, 16, 1);
+    ctx.fillStyle = '#402810';
+    ctx.fillRect(2, 6, 3, 1);
+    ctx.fillRect(3, 7, 1, 3);
+    ctx.fillRect(7, 6, 1, 4);
+    ctx.fillRect(9, 6, 1, 4);
+    ctx.fillRect(8, 7, 1, 2);
+    ctx.fillRect(12, 6, 3, 1);
+    ctx.fillRect(13, 7, 1, 3);
+  },
+  tnt_top: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#c02818', ['#a82010', '#d03820'], 0.2);
+    ctx.fillStyle = '#701008';
+    ctx.fillRect(0, 0, 16, 1);
+    ctx.fillRect(0, 15, 16, 1);
+    ctx.fillRect(0, 0, 1, 16);
+    ctx.fillRect(15, 0, 1, 16);
+    ctx.fillStyle = '#d03820';
+    ctx.fillRect(2, 2, 12, 1);
+    ctx.fillRect(2, 13, 12, 1);
+    ctx.fillRect(2, 2, 1, 12);
+    ctx.fillRect(13, 2, 1, 12);
+  },
+  tnt_bottom: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#a82010', ['#901808', '#b82818'], 0.2);
+    ctx.fillStyle = '#581008';
+    ctx.fillRect(0, 0, 16, 1);
+    ctx.fillRect(0, 15, 16, 1);
+    ctx.fillRect(0, 0, 1, 16);
+    ctx.fillRect(15, 0, 1, 16);
+  },
 };
 
 // ---------- 裂纹贴图（10 阶段，程序化绘制） ----------

@@ -285,6 +285,15 @@
       "renderLayer": "solid",
       "hardness": 0.8
     },
+    "tnt": {
+      "id": 32,
+      "display": "TNT",
+      "model": "block/cube_top",
+      "textures": { "top": "tnt_top", "side": "tnt_side", "bottom": "tnt_bottom" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 0
+    },
     "obsidian": {
       "id": 25,
       "display": "黑曜石",
@@ -292,7 +301,7 @@
       "textures": { "all": "obsidian" },
       "solid": true,
       "renderLayer": "solid",
-      "hardness": 6.0
+      "hardness": 50
     },
     "snow_block": {
       "id": 26,

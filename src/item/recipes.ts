@@ -62,11 +62,37 @@ const RECIPES: Recipe[] = [
   R(2, 3, [P, P, P, S, '', S], { tool: 'wooden_axe', count: 1 }),
   R(2, 3, [C, C, C, S, '', S], { tool: 'stone_axe', count: 1 }),
   R(2, 3, [I, I, I, S, '', S], { tool: 'iron_axe', count: 1 }),
+  // ---- 钻石工具（MC 原版摆法） ----
+  R(3, 3, ['t:diamond', 't:diamond', 't:diamond', '', S, '', '', S, ''], {
+    tool: 'diamond_pickaxe',
+    count: 1,
+  }),
+  R(2, 3, ['t:diamond', 't:diamond', 't:diamond', S, '', S], {
+    tool: 'diamond_axe',
+    count: 1,
+  }),
   // 弓：3 木棍 + 3 羽毛（权宜替代线——暂无蜘蛛；摆法同 MC 弓）
   R(3, 3, ['', S, 't:feather', S, '', 't:feather', '', S, 't:feather'], {
     tool: 'bow',
     count: 1,
   }),
+  // TNT：5 火药 + 4 沙子（MC 原版棋盘摆法）
+  R(
+    3,
+    3,
+    [
+      't:gunpowder',
+      'sand',
+      't:gunpowder',
+      'sand',
+      't:gunpowder',
+      'sand',
+      't:gunpowder',
+      'sand',
+      't:gunpowder',
+    ],
+    { block: 'tnt', count: 1 },
+  ),
 ];
 
 /** 原料格内容：方块名；'' 表示该位置必须为空 */

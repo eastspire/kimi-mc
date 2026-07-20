@@ -3,11 +3,12 @@ import type { BlockDef, ElementDef, FaceName } from '../core/model-loader';
 // ============================================================
 // 区块网格化（Worker 内运行）：
 //  - 隐藏面剔除（cullface / 同类型互剔）
-//  - 全立方体走贪心合并（相同 方块+AO+贴图 的矩形合并）
+//  - 全立方体走贪心合并（相同 方块+AO+光照+贴图 的矩形合并）
 //  - 非全立方体（十字植物等）走逐元素慢路径
 //  - 方向性面明暗 + 逐顶点环境光遮蔽（AO）烘焙进顶点色
+//  - 方块光（荧石等）按面邻格 + AO 同位四角平均，写入 aLight 属性
 //  - 水面在上方非水时下沉 1/8 格
-// 输入：18×128×18 带一圈邻区边的方块数据
+// 输入：18×128×18 带一圈邻区边的方块数据 + 同布局方块光（可为 null）
 // ============================================================
 
 const PX = 18; // x/z 各外扩 1
@@ -25,6 +26,7 @@ export interface MeshArrays {
   uvs: number[];
   tiles: number[];
   colors: number[];
+  lights: number[]; // 逐顶点方块光 0~15
   indices: number[];
 }
 
@@ -34,7 +36,14 @@ export interface ChunkMeshOutput {
 }
 
 function newArrays(): MeshArrays {
-  return { positions: [], uvs: [], tiles: [], colors: [], indices: [] };
+  return {
+    positions: [],
+    uvs: [],
+    tiles: [],
+    colors: [],
+    lights: [],
+    indices: [],
+  };
 }
 
 interface DirSpec {
@@ -265,6 +274,8 @@ const FACE_NORMAL: Record<FaceName, [number, number, number]> = {
   east: [1, 0, 0],
 };
 
+const NO_LIGHT: readonly number[] = [0, 0, 0, 0];
+
 function pushQuad(
   arr: MeshArrays,
   corners: [number, number, number][],
@@ -273,6 +284,7 @@ function pushQuad(
   shade: number,
   ao: readonly number[],
   lowerTop: boolean,
+  lv: readonly number[] = NO_LIGHT,
 ): void {
   const base = arr.positions.length / 3;
   const maxY = Math.max(
@@ -289,6 +301,7 @@ function pushQuad(
     arr.tiles.push(tile);
     const c = shade * AO_CURVE[ao[k]];
     arr.colors.push(c, c, c);
+    arr.lights.push(lv[k]);
   }
   arr.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
@@ -359,6 +372,7 @@ export function buildChunkMesh(
   data: Uint8Array,
   defs: (BlockDef | null)[],
   aoOn: boolean,
+  lightPad: Uint8Array | null,
 ): ChunkMeshOutput {
   const opaque = newArrays();
   const translucent = newArrays();
@@ -376,6 +390,10 @@ export function buildChunkMesh(
     const d = defOf(data[pidx(x, y, z)]);
     return !!d && d.occludes;
   };
+  const lAt = (x: number, y: number, z: number): number => {
+    if (y < 0 || y >= PH) return 0;
+    return lightPad![pidx(x, y, z)];
+  };
 
   // ---------- 慢路径：非全立方体（十字植物等） ----------
   for (let y = 0; y < PH; y++) {
@@ -385,6 +403,9 @@ export function buildChunkMesh(
         const def = defOf(id);
         if (!def || def.fullCube) continue;
         const arr = def.renderLayer === 'translucent' ? translucent : opaque;
+        // 植物等取其所在格光照
+        const cl = lightPad ? lightPad[pidx(x, y, z)] : 0;
+        const lv = [cl, cl, cl, cl];
         for (const el of def.elements) {
           for (const fname of Object.keys(el.faces) as FaceName[]) {
             const face = el.faces[fname]!;
@@ -410,6 +431,7 @@ export function buildChunkMesh(
               FACE_SHADE[fname],
               [3, 3, 3, 3],
               false,
+              lv,
             );
           }
         }
@@ -438,7 +460,7 @@ export function buildChunkMesh(
 
       for (let s = 0; s < S; s++) {
         mask.fill(0, 0, W * H);
-        // 构建切片掩码：(tile+1) | ao<<8 | topFlag<<16
+        // 构建切片掩码：(tile+1)5b | ao8b<<5 | topFlag1b<<13 | light16b<<14
         for (let v = 0; v < H; v++) {
           for (let u = 0; u < W; u++) {
             let x: number, y: number, z: number;
@@ -471,37 +493,45 @@ export function buildChunkMesh(
             }
             const tile = def.faceTiles[dir.name];
             if (tile === undefined) continue;
+            const doAo = bucket === 0 && aoOn;
+            const doLight = bucket === 0 && lightPad !== null;
             let ao = 0b11111111; // 4×2bit = 3,3,3,3（AO 关 → 恒为最亮，合并更充分）
-            if (bucket === 0 && aoOn) {
-              ao = 0;
+            let lpk = 0; // 4×4bit 逐角光照（面邻格 + AO 同位四角平均）
+            if (doAo || doLight) {
+              if (doAo) ao = 0;
+              const lf = doLight ? lAt(x + nx, y + ny, z + nz) : 0;
               for (let k = 0; k < 4; k++) {
-                const s1 = occludesAt(
-                  x + nx + dir.cs[k][0] * t1x,
-                  y + ny + dir.cs[k][0] * t1y,
-                  z + nz + dir.cs[k][0] * t1z,
-                )
-                  ? 1
-                  : 0;
-                const s2 = occludesAt(
-                  x + nx + dir.cs[k][1] * t2x,
-                  y + ny + dir.cs[k][1] * t2y,
-                  z + nz + dir.cs[k][1] * t2z,
-                )
-                  ? 1
-                  : 0;
-                const cc = occludesAt(
-                  x + nx + dir.cs[k][0] * t1x + dir.cs[k][1] * t2x,
-                  y + ny + dir.cs[k][0] * t1y + dir.cs[k][1] * t2y,
-                  z + nz + dir.cs[k][0] * t1z + dir.cs[k][1] * t2z,
-                )
-                  ? 1
-                  : 0;
-                const a = s1 && s2 ? 0 : 3 - (s1 + s2 + cc);
-                ao |= a << (k * 2);
+                const s1x = x + nx + dir.cs[k][0] * t1x,
+                  s1y = y + ny + dir.cs[k][0] * t1y,
+                  s1z = z + nz + dir.cs[k][0] * t1z;
+                const s2x = x + nx + dir.cs[k][1] * t2x,
+                  s2y = y + ny + dir.cs[k][1] * t2y,
+                  s2z = z + nz + dir.cs[k][1] * t2z;
+                const ccx = s1x + dir.cs[k][1] * t2x,
+                  ccy = s1y + dir.cs[k][1] * t2y,
+                  ccz = s1z + dir.cs[k][1] * t2z;
+                if (doAo) {
+                  const s1 = occludesAt(s1x, s1y, s1z) ? 1 : 0;
+                  const s2 = occludesAt(s2x, s2y, s2z) ? 1 : 0;
+                  const cc = occludesAt(ccx, ccy, ccz) ? 1 : 0;
+                  const a = s1 && s2 ? 0 : 3 - (s1 + s2 + cc);
+                  ao |= a << (k * 2);
+                }
+                if (doLight) {
+                  const lk =
+                    (lf +
+                      lAt(s1x, s1y, s1z) +
+                      lAt(s2x, s2y, s2z) +
+                      lAt(ccx, ccy, ccz) +
+                      2) >>
+                    2;
+                  lpk |= lk << (k * 4);
+                }
               }
             }
             const topFlag = bucket === 1 && rawAt(x, y + 1, z) !== id ? 1 : 0;
-            mask[u + W * v] = (tile + 1) | (ao << 8) | (topFlag << 16);
+            mask[u + W * v] =
+              (tile + 1) | (ao << 5) | (topFlag << 13) | (lpk << 14);
           }
         }
         // 贪心扩展矩形
@@ -521,15 +551,22 @@ export function buildChunkMesh(
             for (let dv = 0; dv < h; dv++)
               mask.fill(0, u + W * (v + dv), u + w + W * (v + dv));
 
-            const tile = (val & 0xff) - 1;
-            const aoPacked = (val >> 8) & 0xff;
+            const tile = (val & 31) - 1;
+            const aoPacked = (val >> 5) & 0xff;
             const ao = [
               aoPacked & 3,
               (aoPacked >> 2) & 3,
               (aoPacked >> 4) & 3,
               (aoPacked >> 6) & 3,
             ];
-            const lowerTop = bucket === 1 && ((val >> 16) & 1) === 1;
+            const lowerTop = bucket === 1 && ((val >> 13) & 1) === 1;
+            const lpk = (val >> 14) & 0xffff;
+            const lv = [
+              lpk & 15,
+              (lpk >> 4) & 15,
+              (lpk >> 8) & 15,
+              (lpk >> 12) & 15,
+            ];
             pushQuad(
               arr,
               faceCorners(dir, s, u, v, w, h),
@@ -538,6 +575,7 @@ export function buildChunkMesh(
               dir.shade,
               ao,
               lowerTop,
+              lv,
             );
           }
         }

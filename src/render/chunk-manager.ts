@@ -33,7 +33,8 @@ interface FlightInfo {
   since: number;
 }
 
-/** 注入图集 UV 重映射 shader：uv 为“格内局部坐标”，aTile 为图集格号 */
+/** 注入图集 UV 重映射 shader：uv 为“格内局部坐标”，aTile 为图集格号；
+ *  aLight 为逐顶点方块光，与日光 uDay 取最大（MC 光曲线近似：0 级保底 0.08） */
 const MAP_FRAG = /* glsl */ `
 #ifdef USE_MAP
   float tileCol = mod(vTile, 8.0);
@@ -45,18 +46,30 @@ const MAP_FRAG = /* glsl */ `
   );
   diffuseColor *= texture2D(map, atlasUv);
 #endif
+  float mcBright = max(uDay, 0.08 + 0.92 * (vLight / 15.0));
+  diffuseColor.rgb *= mcBright;
 `;
 
-function patchAtlasUv(mat: THREE.MeshBasicMaterial): void {
+function patchAtlasUv(
+  mat: THREE.MeshBasicMaterial,
+  dayUniform: { value: number },
+): void {
   mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uDay = dayUniform;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        '#include <common>\nattribute float aTile;\nvarying float vTile;',
+        '#include <common>\nattribute float aTile;\nattribute float aLight;\nvarying float vTile;\nvarying float vLight;',
       )
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvTile = aTile;');
+      .replace(
+        '#include <uv_vertex>',
+        '#include <uv_vertex>\nvTile = aTile;\nvLight = aLight;',
+      );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vTile;')
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform float uDay;\nvarying float vTile;\nvarying float vLight;',
+      )
       .replace('#include <map_fragment>', MAP_FRAG);
   };
 }
@@ -64,6 +77,8 @@ function patchAtlasUv(mat: THREE.MeshBasicMaterial): void {
 export class ChunkManager {
   readonly opaqueMat: THREE.MeshBasicMaterial;
   readonly waterMat: THREE.MeshBasicMaterial;
+  /** 全局日光强度（0~1），sky 每帧写入，所有区块材质共享 */
+  readonly dayUniform = { value: 1.0 };
 
   private workers: Worker[] = [];
   private idle: Worker[] = [];
@@ -124,7 +139,7 @@ export class ChunkManager {
       vertexColors: true,
       alphaTest: 0.5, // 植物/玻璃镂空
     });
-    patchAtlasUv(this.opaqueMat);
+    patchAtlasUv(this.opaqueMat, this.dayUniform);
 
     this.waterMat = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -133,7 +148,7 @@ export class ChunkManager {
       opacity: 0.72,
       depthWrite: false,
     });
-    patchAtlasUv(this.waterMat);
+    patchAtlasUv(this.waterMat, this.dayUniform);
 
     this.workerDefs = defs;
     const count = Math.max(
@@ -208,6 +223,15 @@ export class ChunkManager {
     if (lz === 15) this.queueMesh(cx, cz + 1);
   }
 
+  /** 方块光照变化后：光传播可达 15 格，重网格化 3×3 邻域 */
+  markEditedArea(cx: number, cz: number): void {
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        this.queueMesh(cx + dx, cz + dz);
+      }
+    }
+  }
+
   private queueMesh(cx: number, cz: number): void {
     if (!this.world.hasChunk(cx, cz)) return;
     const key = chunkKey(cx, cz);
@@ -217,8 +241,12 @@ export class ChunkManager {
     this.waiting.set(key, { cx, cz, version: v });
   }
 
-  /** 组装 18×128×18 带邻边数据（逐列拷贝，未加载邻区留 0=空气） */
-  private buildPadded(cx: number, cz: number): ArrayBuffer {
+  /** 从任意 16×128×16 布局的 Map 组装 18×128×18 带邻边数据（逐列拷贝，未加载邻区留 0） */
+  private buildPaddedFrom(
+    src: ReadonlyMap<string, Uint8Array>,
+    cx: number,
+    cz: number,
+  ): ArrayBuffer {
     const out = new Uint8Array(PAD_X * H * PAD_Z);
     for (let lz = -1; lz <= 16; lz++) {
       for (let lx = -1; lx <= 16; lx++) {
@@ -226,18 +254,29 @@ export class ChunkManager {
         const wz = cz * 16 + lz;
         const ccx = Math.floor(wx / 16);
         const ccz = Math.floor(wz / 16);
-        const chunk = this.world.chunks.get(chunkKey(ccx, ccz));
+        const chunk = src.get(chunkKey(ccx, ccz));
         if (!chunk) continue;
-        let src = wx - ccx * 16 + 16 * (wz - ccz * 16);
-        let dst = lx + 1 + PAD_X * (lz + 1);
+        let s = wx - ccx * 16 + 16 * (wz - ccz * 16);
+        let d = lx + 1 + PAD_X * (lz + 1);
         for (let y = 0; y < H; y++) {
-          out[dst] = chunk[src];
-          src += 256; // 16×16
-          dst += PAD_X * PAD_Z;
+          out[d] = chunk[s];
+          s += 256; // 16×16
+          d += PAD_X * PAD_Z;
         }
       }
     }
     return out.buffer;
+  }
+
+  /** 组装 18×128×18 带邻边方块数据 */
+  private buildPadded(cx: number, cz: number): ArrayBuffer {
+    return this.buildPaddedFrom(this.world.chunks, cx, cz);
+  }
+
+  /** 组装 18×128×18 带邻边光照数据；3×3 邻域无光时返回 null（零开销快路径） */
+  private buildPaddedLight(cx: number, cz: number): ArrayBuffer | null {
+    if (!this.world.hasLightNear(cx, cz)) return null;
+    return this.buildPaddedFrom(this.world.light, cx, cz);
   }
 
   /** 确保玩家周围区块已生成 / 已排队网格化；卸载远处区块 */
@@ -305,6 +344,7 @@ export class ChunkManager {
     geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2));
     geo.setAttribute('aTile', new THREE.BufferAttribute(g.tiles, 1));
+    geo.setAttribute('aLight', new THREE.BufferAttribute(g.lights, 1));
     geo.setAttribute('color', new THREE.BufferAttribute(g.colors, 3));
     geo.setIndex(new THREE.BufferAttribute(g.indices, 1));
     // 手动包围球：恒定值，避免 computeBoundingSphere 遍历
@@ -442,9 +482,17 @@ export class ChunkManager {
         this.waiting.delete(key);
         this.inFlight.set(key, { version: job.version, worker: w, since: now });
         const data = this.buildPadded(job.cx, job.cz);
+        const light = this.buildPaddedLight(job.cx, job.cz);
         w.postMessage(
-          { type: 'mesh', cx: job.cx, cz: job.cz, version: job.version, data },
-          [data],
+          {
+            type: 'mesh',
+            cx: job.cx,
+            cz: job.cz,
+            version: job.version,
+            data,
+            light,
+          },
+          light ? [data, light] : [data],
         );
       }
     }

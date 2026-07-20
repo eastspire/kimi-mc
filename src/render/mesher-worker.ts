@@ -6,7 +6,7 @@ import { WorldGen } from '../world/worldgen';
 // ============================================================
 // 区块 Worker：同池双任务
 //  - gen：按种子生成地形（噪声计算重，移出主线程防卡顿）
-//  - mesh：接收带邻边的方块数据做网格化，回传 TypedArray（零拷贝转移）
+//  - mesh：接收带邻边的方块数据 + 方块光做网格化，回传 TypedArray（零拷贝转移）
 //  - config：运行时开关（平滑光照 AO）
 // ============================================================
 
@@ -15,6 +15,7 @@ export interface PackedGeometry {
   uvs: Float32Array;
   tiles: Float32Array;
   colors: Float32Array;
+  lights: Float32Array;
   indices: Uint32Array;
 }
 
@@ -27,6 +28,7 @@ export interface MeshJobIn {
   cz?: number;
   version?: number;
   data?: ArrayBuffer;
+  light?: ArrayBuffer | null;
 }
 
 export interface MeshJobOut {
@@ -64,6 +66,7 @@ function pack(arr: MeshArrays | null): PackedGeometry | null {
     uvs: new Float32Array(arr.uvs),
     tiles: new Float32Array(arr.tiles),
     colors: new Float32Array(arr.colors),
+    lights: new Float32Array(arr.lights),
     indices: new Uint32Array(arr.indices),
   };
 }
@@ -107,7 +110,9 @@ self.onmessage = (e: MessageEvent<MeshJobIn>) => {
   if (m.type === 'mesh' && defs && m.data) {
     let out: ReturnType<typeof buildChunkMesh>;
     try {
-      out = buildChunkMesh(new Uint8Array(m.data), defs, aoEnabled);
+      const lightPad =
+        m.light && m.light.byteLength > 0 ? new Uint8Array(m.light) : null;
+      out = buildChunkMesh(new Uint8Array(m.data), defs, aoEnabled, lightPad);
     } catch (err) {
       // 网格化异常：回传空结果保证任务闭环，不让 Worker 沉默
       console.error('[mc] 区块网格化失败', m.cx, m.cz, err);
@@ -134,6 +139,7 @@ self.onmessage = (e: MessageEvent<MeshJobIn>) => {
           g.uvs.buffer,
           g.tiles.buffer,
           g.colors.buffer,
+          g.lights.buffer,
           g.indices.buffer,
         );
       }

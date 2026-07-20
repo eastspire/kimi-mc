@@ -429,9 +429,15 @@ function startGame(
 
   /** 写入方块并同步：网格重建 + 修改集合（存档用） */
   function applyEdit(wx: number, y: number, wz: number, id: number): void {
+    const oldId = world.getBlock(wx, y, wz);
     const edit = world.setBlock(wx, y, wz, id);
     if (!edit) return;
     chunkManager.markEdited(edit.cx, edit.cz, edit.lx, edit.lz);
+    // 光照可能跨区块传播（最远 15 格）：涉及光源或邻域有光时按 3×3 重网格化
+    const oldLum = oldId > 0 ? (registry.def(oldId)?.luminance ?? 0) : 0;
+    const newLum = id > 0 ? (registry.def(id)?.luminance ?? 0) : 0;
+    if (oldLum > 0 || newLum > 0 || world.hasLightNear(edit.cx, edit.cz))
+      chunkManager.markEditedArea(edit.cx, edit.cz);
     const data = world.chunks.get(chunkKey(edit.cx, edit.cz));
     if (data) modifiedChunks.set(chunkKey(edit.cx, edit.cz), data);
   }
@@ -581,7 +587,8 @@ function startGame(
       } else {
         startScreen.setProgress(`正在生成世界… ${Math.round(p * 100)}%`, p);
       }
-      sky.update(dt, camera, [chunkManager.opaqueMat, chunkManager.waterMat]);
+      sky.update(dt, camera, []);
+      chunkManager.dayUniform.value = sky.daylight;
       camera.position.set(body.x, body.y + EYE_HEIGHT, body.z);
       if (!hidden) {
         renderer.clear();
@@ -643,7 +650,8 @@ function startGame(
     // 区块流式更新（游戏中保守上传预算；进度统计仅加载阶段开启）
     chunkManager.update(body.x, body.z, state === 'playing' ? 6 : 24, false);
 
-    sky.update(dt, camera, [chunkManager.opaqueMat, chunkManager.waterMat]);
+    sky.update(dt, camera, []);
+    chunkManager.dayUniform.value = sky.daylight;
     clouds.update(elapsed, body.x, body.z, sky.daylight);
 
     // 水下雾：相机没入水中 → 深蓝绿短视距雾 + 清屏色；出水恢复

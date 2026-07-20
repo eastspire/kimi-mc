@@ -363,6 +363,7 @@ export class ChunkManager {
         this.waiting.delete(key);
         this.versions.delete(key); // 防版本表无限增长
         this.disposeMeshes(key);
+        this.onChunkUnloaded?.(cx, cz);
       }
     }
   }
@@ -416,6 +417,9 @@ export class ChunkManager {
 
   /** 区块首次落地（生成/读档）时的回调（地图探索记录用） */
   onChunkExplored: ((cx: number, cz: number) => void) | null = null;
+
+  /** 区块卸载（视距外删除）时的回调（清理附着在该区块的状态，如熔炉，防无限增长） */
+  onChunkUnloaded: ((cx: number, cz: number) => void) | null = null;
 
   /**
    * 每帧驱动。applyBudget：最多上传多少网格；
@@ -549,8 +553,11 @@ export class ChunkManager {
       }
     }
 
-    // 4) 加载进度（仅启动阶段统计）
+    // 4) 加载进度（仅启动阶段统计）。节流:每 ~100ms 才重扫一遍槽位,
+    // 否则加载期每帧 289 槽 × Map 查询纯属浪费,中间帧返回缓存值。
     if (!wantProgress) return 1;
+    if (now - this.lastProgressAt < 100) return this.lastProgress;
+    this.lastProgressAt = now;
     const pcx = Math.floor(px / 16);
     const pcz = Math.floor(pz / 16);
     const R = this.rd;
@@ -572,8 +579,12 @@ export class ChunkManager {
         }
       }
     }
-    return total === 0 ? 1 : done / total;
+    this.lastProgress = total === 0 ? 1 : done / total;
+    return this.lastProgress;
   }
+
+  private lastProgressAt = 0;
+  private lastProgress = 0;
 
   get loadedCount(): number {
     return this.world.chunks.size;

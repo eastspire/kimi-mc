@@ -31,6 +31,8 @@ export class MobManager {
   private mobs: Mob[] = [];
   private spawnTimer = 4;
   private burnTick = 0;
+  /** 帧序号（远距生物降频步进用） */
+  private frameNo = 0;
   /** 当前世界维度（决定刷怪池与地表判定） */
   private dimension: 'overworld' | 'nether' | 'end' | 'aether' = 'overworld';
   /** 兼容字段：是否为下界 */
@@ -321,10 +323,23 @@ export class MobManager {
       }
     }
 
-    // 步进 + 死亡处理 + 远距离消失
+    // 步进 + 死亡处理 + 远距离消失。
+    // 远处生物降频步进（AABB 体素碰撞是每帧最贵操作）：>32 格每 3 帧一步,
+    // 步长相应放大保持宏观移动一致;近处/有目标的生物仍每帧精细节奏。
+    this.frameNo++;
     for (let i = this.mobs.length - 1; i >= 0; i--) {
       const m = this.mobs[i];
-      m.step(dt);
+      const ddx = m.x - px;
+      const ddz = m.z - pz;
+      const d2 = ddx * ddx + ddz * ddz;
+      const far = d2 > 32 * 32 && !m.hasTarget && !m.dying;
+      const stride = far ? 3 : 1;
+      if (far && this.frameNo % stride !== i % stride) {
+        // 本帧跳过该远生物;仍需做远距离消失判定
+        if (d2 > DESPAWN_DIST * DESPAWN_DIST) this.removeAt(i);
+        continue;
+      }
+      m.step(dt * stride);
       m.syncModel(dt);
       if (m.attackLanded) {
         m.attackLanded = false;

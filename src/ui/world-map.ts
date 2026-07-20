@@ -98,11 +98,18 @@ export class WorldMap {
       lastY = e.clientY;
       this.redrawPending = true;
     });
-    this.canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      this.scale = Math.max(2, Math.min(12, this.scale + (e.deltaY < 0 ? 1 : -1)));
-      this.redrawPending = true;
-    }, { passive: false });
+    this.canvas.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        this.scale = Math.max(
+          2,
+          Math.min(12, this.scale + (e.deltaY < 0 ? 1 : -1)),
+        );
+        this.redrawPending = true;
+      },
+      { passive: false },
+    );
   }
 
   private redrawPending = true;
@@ -124,24 +131,63 @@ export class WorldMap {
   /**
    * 采样某区块顶面颜色并记录（区块网格化落地时调用）。
    * 逐列自上而下找第一个"有颜色"的方块（非空气、非透明流体之上的实体或水面）。
+   * 直接读 chunk raw Uint8Array，跳过 World.getBlock 的 Map+字符串开销。
    */
   recordChunk(world: World, cx: number, cz: number, dim: Dimension): void {
+    const chunk = world.chunkAt(cx, cz);
+    if (!chunk) return; // 已被卸载则跳过（罕发，但仍需兜底）
     const key = `${cx},${cz}`;
     const colors = new Uint8Array(RES * RES);
     for (let lz = 0; lz < RES; lz++) {
       for (let lx = 0; lx < RES; lx++) {
-        const wx = cx * CHUNK_X + lx;
-        const wz = cz * CHUNK_Z + lz;
-        colors[lx + lz * RES] = this.topColor(world, wx, wz);
+        colors[lx + lz * RES] = this.topColor(lx, lz, chunk);
       }
     }
     this.table(dim).set(key, colors);
   }
 
-  /** 求某列顶面代表色（RGB332）。从世界顶向下找首个可着色方块。 */
-  private topColor(world: World, wx: number, wz: number): number {
-    for (let y = CHUNK_Y - 1; y >= 0; y--) {
-      const id = world.getBlock(wx, y, wz);
+  // ---- 加载期采样节流：区块落地只入队,主循环每帧限量消化,避免加载界面卡死 ----
+  private pending: { world: World; cx: number; cz: number; dim: Dimension }[] =
+    [];
+  private pendingKeys = new Set<string>();
+
+  /** 区块落地时排队采样(不立即执行)。重复的区块只排一次(生成后又编辑)。 */
+  enqueueChunk(world: World, cx: number, cz: number, dim: Dimension): void {
+    const k = `${dim}:${cx},${cz}`;
+    if (this.pendingKeys.has(k)) return;
+    this.pendingKeys.add(k);
+    this.pending.push({ world, cx, cz, dim });
+  }
+
+  /**
+   * 每帧限量消化待采样区块。budget 为本帧最多采样的区块数。
+   * 加载阶段每帧调用,把集中在落地高峰的采样摊开,主线程不再被一次性打断。
+   */
+  drainQueue(budget: number): void {
+    let n = 0;
+    while (n < budget && this.pending.length > 0) {
+      const p = this.pending.shift()!;
+      this.pendingKeys.delete(`${p.dim}:${p.cx},${p.cz}`);
+      this.recordChunk(p.world, p.cx, p.cz, p.dim);
+      n++;
+    }
+  }
+
+  /** 求某列顶面代表色（RGB332）。从世界顶向下找首个可着色方块。
+   * 热路径优化：跳过 World.getBlock 的 Map 查找 + 字符串 key 分配，
+   * 直接读 chunk raw Uint8Array（每列 ~10 次 typed-array 读，无分配）。 */
+  private topColor(lx: number, lz: number, chunk: Uint8Array): number {
+    // chunk 内部布局：lx + CHUNK_X * (lz + CHUNK_Z * y)
+    const STEP = 16;
+    let y = CHUNK_Y - 1;
+    // 快降：跳过整段全空区域
+    while (y >= STEP) {
+      if (chunk[lx + CHUNK_X * (lz + CHUNK_Z * y)] !== 0) break;
+      y -= STEP;
+    }
+    const top = Math.min(CHUNK_Y - 1, y + STEP);
+    for (let yy = top; yy >= 0; yy--) {
+      const id = chunk[lx + CHUNK_X * (lz + CHUNK_Z * yy)];
       if (id === 0) continue;
       const def = this.reg.def(id);
       if (!def) continue;
@@ -155,7 +201,6 @@ export class WorldMap {
       const r = this.atlas.tileColors[tile * 3];
       const g = this.atlas.tileColors[tile * 3 + 1];
       const b = this.atlas.tileColors[tile * 3 + 2];
-      // 空气色视作透明继续向下；有水则偏蓝
       return pack332(r, g, b);
     }
     return 0; // 全空列
@@ -287,7 +332,12 @@ export class WorldMap {
           const [r, g, b] = unpack332(v);
           ctx.fillStyle = `rgb(${r},${g},${b})`;
         }
-        ctx.fillRect(Math.floor(sx), Math.floor(sz), Math.ceil(s), Math.ceil(s));
+        ctx.fillRect(
+          Math.floor(sx),
+          Math.floor(sz),
+          Math.ceil(s),
+          Math.ceil(s),
+        );
       }
     }
   }

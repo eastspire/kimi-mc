@@ -1,4 +1,5 @@
 import type { World } from '../world/world';
+import { CHUNK_X, CHUNK_Z } from '../world/chunk-const';
 import {
   buildPigModel,
   buildZombieModel,
@@ -193,7 +194,8 @@ export class Mob {
     this.x = x;
     this.y = y;
     this.z = z;
-    this.uid = uid !== 0 ? uid : ((x * 73856093) ^ (z * 19349663) ^ 0x9e3779) | 0;
+    this.uid =
+      uid !== 0 ? uid : ((x * 73856093) ^ (z * 19349663) ^ 0x9e3779) | 0;
     this.yaw = Math.random() * Math.PI * 2;
     this.aiTimer = 1 + Math.random() * 3;
     this.legPhase = LEG_PHASE[kind];
@@ -242,14 +244,24 @@ export class Mob {
     return true;
   }
 
-  private solidAt(bx: number, by: number, bz: number): boolean {
-    // 未加载区块视为实体（与玩家物理一致，防坠虚空）
-    if (!this.world.hasChunk(Math.floor(bx / 16), Math.floor(bz / 16)))
-      return true;
+  private solidAt(
+    bx: number,
+    by: number,
+    bz: number,
+    chunkLoaded: boolean,
+  ): boolean {
+    // 未加载区块视为实体（与玩家物理一致，防坠虚空）；
+    // 调用方预先解析 AABB 包含的区块是否全部加载
+    if (!chunkLoaded) return true;
     return this.world.isSolid(bx, by, bz);
   }
 
-  private boxCollides(x: number, y: number, z: number): boolean {
+  private boxCollides(
+    x: number,
+    y: number,
+    z: number,
+    chunkLoaded: boolean,
+  ): boolean {
     const x0 = Math.floor(x - this.half);
     const x1 = Math.floor(x + this.half - 1e-7);
     const y0 = Math.floor(y);
@@ -259,14 +271,31 @@ export class Mob {
     for (let by = y0; by <= y1; by++)
       for (let bz = z0; bz <= z1; bz++)
         for (let bx = x0; bx <= x1; bx++)
-          if (this.solidAt(bx, by, bz)) return true;
+          if (this.solidAt(bx, by, bz, chunkLoaded)) return true;
     return false;
+  }
+
+  /** AABB 所跨的 chunk 是否都已加载；任一未加载即视为碰撞兜底 */
+  private aabbChunksLoaded(x: number, _y: number, z: number): boolean {
+    const x0 = Math.floor(x - this.half);
+    const x1 = Math.floor(x + this.half - 1e-7);
+    const z0 = Math.floor(z - this.half);
+    const z1 = Math.floor(z + this.half - 1e-7);
+    const cx0 = (x0 / CHUNK_X) | 0,
+      cx1 = (x1 / CHUNK_X) | 0;
+    const cz0 = (z0 / CHUNK_Z) | 0,
+      cz1 = (z1 / CHUNK_Z) | 0;
+    for (let cz = cz0; cz <= cz1; cz++)
+      for (let cx = cx0; cx <= cx1; cx++)
+        if (!this.world.hasChunk(cx, cz)) return false;
+    return true;
   }
 
   private moveAxis(axis: 'x' | 'y' | 'z', delta: number): boolean {
     if (delta === 0) return false;
     this[axis] += delta;
-    if (!this.boxCollides(this.x, this.y, this.z)) return false;
+    const loaded = this.aabbChunksLoaded(this.x, this.y, this.z);
+    if (loaded && !this.boxCollides(this.x, this.y, this.z, true)) return false;
 
     const x0 = Math.floor(this.x - this.half);
     const x1 = Math.floor(this.x + this.half - 1e-7);
@@ -278,7 +307,7 @@ export class Mob {
     for (let by = y0; by <= y1; by++) {
       for (let bz = z0; bz <= z1; bz++) {
         for (let bx = x0; bx <= x1; bx++) {
-          if (!this.solidAt(bx, by, bz)) continue;
+          if (!this.solidAt(bx, by, bz, loaded)) continue;
           hit = true;
           if (axis === 'x') {
             this.x =
@@ -301,16 +330,26 @@ export class Mob {
   }
 
   /** 末影人瞬移：在 (cx,cy,cz) 附近随机找一处可站立位置，瞬移过去（MC） */
-  private teleportNear(cx: number, cy: number, cz: number, radius: number): void {
+  private teleportNear(
+    cx: number,
+    cy: number,
+    cz: number,
+    radius: number,
+  ): void {
     for (let attempt = 0; attempt < 12; attempt++) {
       const nx = cx + (Math.random() - 0.5) * 2 * radius;
       const nz = cz + (Math.random() - 0.5) * 2 * radius;
       const bx = Math.floor(nx);
       const bz = Math.floor(nz);
       // 自上而下找可站立面（脚下方块实体、头顶净空）
-      for (let by = Math.min(120, Math.floor(cy) + 4); by > Math.floor(cy) - 6; by--) {
-        if (!this.solidAt(bx, by, bz)) continue;
-        if (this.boxCollides(nx, by + 1.01, nz)) break;
+      for (
+        let by = Math.min(120, Math.floor(cy) + 4);
+        by > Math.floor(cy) - 6;
+        by--
+      ) {
+        if (!this.solidAt(bx, by, bz, this.aabbChunksLoaded(nx, by + 1.01, nz)))
+          continue;
+        if (this.boxCollides(nx, by + 1.01, nz, true)) break;
         this.x = nx;
         this.y = by + 1.01;
         this.z = nz;
@@ -351,13 +390,23 @@ export class Mob {
         ) {
           chasing = true;
           this.yaw = Math.atan2(-dx, -dz);
-          if (d < ATTACK_RANGE + this.half && dy < 2.2 && this.attackTimer <= 0) {
+          if (
+            d < ATTACK_RANGE + this.half &&
+            dy < 2.2 &&
+            this.attackTimer <= 0
+          ) {
             this.attackTimer = 1;
             this.attackAnim = 0.45;
             this.attackLanded = true;
           }
           // 蜘蛛跃击：追击接近时概率前扑跳起（MC 蜘蛛特性）
-          if (this.kind === 'spider' && this.onGround && d < 6 && d > 2 && Math.random() < 0.02)
+          if (
+            this.kind === 'spider' &&
+            this.onGround &&
+            d < 6 &&
+            d > 2 &&
+            Math.random() < 0.02
+          )
             this.vy = JUMP_VEL * 1.1;
           // 末影人瞬移：追击时周期性瞬移到玩家附近（MC 特性）
           if (this.kind === 'enderman') {
@@ -449,7 +498,10 @@ export class Mob {
         const d = Math.hypot(dx, dz) || 1;
         this.vx = (dx / d) * this.speed;
         this.vz = (dz / d) * this.speed;
-        this.vy = Math.max(-1.2, Math.min(1.2, (this.targetY + 6 - this.y) * 0.6));
+        this.vy = Math.max(
+          -1.2,
+          Math.min(1.2, (this.targetY + 6 - this.y) * 0.6),
+        );
       } else {
         // 游荡：借共用 aiTimer 切换漂移方向
         this.aiTimer -= dt;
@@ -550,7 +602,8 @@ export class Mob {
         this.attackAnim -= dt;
         if (this.kind === 'zombie')
           armRot = base - Math.abs(Math.sin(this.attackAnim * 14)) * 0.6;
-        else armRot = base + (Math.PI / 2) * Math.min(1, this.attackAnim / 0.45);
+        else
+          armRot = base + (Math.PI / 2) * Math.min(1, this.attackAnim / 0.45);
       }
       for (const a of this.model.arms) a.rotation.x = armRot;
     }

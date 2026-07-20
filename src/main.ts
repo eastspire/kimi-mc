@@ -622,10 +622,29 @@ function startGame(
 
   // ---- 全屏地图（M 键）：按区块记录已探索区域，随存档持久化 ----
   const worldMap = new WorldMap(registry, atlas, save?.meta.maps);
-  // 区块落地（生成/读档）即采样进地图；玩家编辑的区块随后由 applyEdit 重采样
+  // 区块落地（生成/读档）即排队采样进地图；采样在每帧限量消化,避免加载高峰集中
+  // 扫描全部区块（217 区块 × ~4000 getBlock）一次性打断主线程 → 加载界面卡死。
   for (const dim of ALL_DIMS) {
     const d = dims[dim];
-    d.cm.onChunkExplored = (cx, cz) => worldMap.recordChunk(d.world, cx, cz, dim);
+    d.cm.onChunkExplored = (cx, cz) =>
+      worldMap.enqueueChunk(d.world, cx, cz, dim);
+    // 区块卸载时清理其中的"空烧完且无物品"熔炉状态,防 furnaces Map 随探索无限增长
+    // (有物品或仍在烧的保留,玩家回来时不丢进度)。卸载区块本就不该再被每帧 tick。
+    d.cm.onChunkUnloaded = (cx, cz) => {
+      const bx = cx * 16;
+      const bz = cz * 16;
+      for (const [key, st] of [...furnaces]) {
+        if (
+          st.x >= bx && st.x < bx + 16 &&
+          st.z >= bz && st.z < bz + 16 &&
+          !st.input.block && !st.input.food && !st.input.tool &&
+          !st.fuel.block && !st.fuel.food && !st.fuel.tool &&
+          !st.output.block && !st.output.food && !st.output.tool
+        ) {
+          furnaces.delete(key);
+        }
+      }
+    };
     // 加载阶段挂起邻区重网格化：区块落地不再触发四邻反复重建，
     // 待世界稳定（加载完成）后统一按最新版本重排，每区块只网格化一次。
     d.cm.setDeferNeighbors(true);
@@ -740,6 +759,7 @@ function startGame(
   let eatTimer = 0;
   let nextCrunch = 0.4;
   let growTimer = 0; // 作物随机 tick 节流
+  let furnaceTickAcc = 0; // 远处熔炉低频 tick 节流
   let bowCharge = 0; // 弓蓄力进度（秒，>0 表示正在拉弓）
   let stareTimer = 0; // 末影人注视计时（>0.25s 激怒）
 
@@ -1717,21 +1737,9 @@ function startGame(
       5,
     );
 
-    // 生物拾取：命中生物且比方块更近时优先攻击（MC 行为）
-    const mobHit = mobManager.raycastMob(
-      eye.x,
-      eye.y,
-      eye.z,
-      tmpDir.x,
-      tmpDir.y,
-      tmpDir.z,
-      5,
-    );
-    const mobPriority =
-      mobHit !== null && (!currentHit || mobHit.dist < currentHit.dist);
-
-    // 末影人注视激怒（MC）：准星远距离锁定其头部约 0.25s 即激怒
-    const stareHit = mobManager.raycastMob(
+    // 生物拾取：一次 32 格射线同时服务近战判定(≤5 格)与末影人注视(≤32 格),
+    // 避免每帧对全部生物做两遍 AABB 扫描。
+    const mobRay = mobManager.raycastMob(
       eye.x,
       eye.y,
       eye.z,
@@ -1740,6 +1748,12 @@ function startGame(
       tmpDir.z,
       32,
     );
+    const mobHit = mobRay && mobRay.dist <= 5 ? mobRay : null;
+    const mobPriority =
+      mobHit !== null && (!currentHit || mobHit.dist < currentHit.dist);
+
+    // 末影人注视激怒（MC）：准星远距离锁定其头部约 0.25s 即激怒
+    const stareHit = mobRay;
     if (stareHit && stareHit.mob.kind === 'enderman' && !stareHit.mob.dying) {
       stareTimer += dt;
       if (stareTimer > 0.25) stareHit.mob.provoked = true;
@@ -2004,6 +2018,8 @@ function startGame(
     if (state === 'loading') {
       const cm = cur().cm;
       const p = cm.update(body.x, body.z, 24, true);
+      // 加载期地图采样节流：每帧限量消化落地高峰排队的区块,主线程不被一次性打断
+      worldMap.drainQueue(6);
       if (p >= 1) {
         if (deferringLoad) {
           // 第一阶段完成（全部地形已生成）：放开网格化，进入第二阶段
@@ -2273,9 +2289,20 @@ function startGame(
         sfx.playXp();
       });
 
-      // 熔炉：后台持续烧炼（MC：关闭界面不中断）；UI 打开时标脏刷新
+      // 熔炉：后台持续烧炼（MC：关闭界面不中断）；UI 打开时标脏刷新。
+      // 节流：玩家附近熔炉每帧 tick；远处熔炉视觉不可见,按 0.5s 低频一次性补进度,
+      // 且区块卸载后空熔炉已被移除 —— 避免熔炉多时主循环每帧全量扫描。
+      furnaceTickAcc += dt;
+      const farTick = furnaceTickAcc >= 0.5;
+      if (farTick) furnaceTickAcc = 0;
       for (const st of furnaces.values()) {
-        if (tickFurnace(st, dt, resolveSmeltOut)) furnaceUI.markDirty();
+        const dx = st.x - body.x;
+        const dz = st.z - body.z;
+        const near = dx * dx + dz * dz < 48 * 48;
+        if (!near && !farTick) continue; // 远处熔炉本帧跳过
+        // 远处熔炉一次性补上累积时间,保证烧炼进度不落后
+        const step = near ? dt : 0.5;
+        if (tickFurnace(st, step, resolveSmeltOut)) furnaceUI.markDirty();
       }
       furnaceUI.update();
 
@@ -2364,6 +2391,8 @@ function startGame(
 
     // 区块流式更新（游戏中保守上传预算；进度统计仅加载阶段开启）
     cur().cm.update(body.x, body.z, state === 'playing' ? 6 : 24, false);
+    // 游戏中继续消化排队的地图采样（玩家移动触发的新区块落地），每帧限量防尖刺
+    worldMap.drainQueue(state === 'playing' ? 2 : 8);
 
     sky.update(dt, camera, []);
     cur().cm.dayUniform.value = sky.daylight;

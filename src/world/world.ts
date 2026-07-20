@@ -5,10 +5,17 @@ import { addLight, onBlockLightChanged } from './lighting';
 // ============================================================
 // 世界存储：Map<"cx,cz", Uint8Array>，方块编辑即标记脏区块
 // 光照：与方块平行的逐区块 0~15 方块光（荧石等光源 BFS 泛洪）
+// 热路径：getBlock / isSolid 不分配字符串 key —— 用 packKey 把 (cx,cz)
+// 打成 32-bit 整数作为 Map key；公共 API 仍走字符串 key 便于外部交互
 // ============================================================
 
 export function chunkKey(cx: number, cz: number): string {
-  return `${cx},${cz}`;
+  return cx + ',' + cz;
+}
+
+// 紧凑整数键：把 cx 放高 16 位、cz 放低 16 位（每个坐标范围 ±2^15 足够）
+function packKey(cx: number, cz: number): number {
+  return ((cx + 32768) << 16) | (cz + 32768);
 }
 
 export interface BlockEdit {
@@ -29,17 +36,28 @@ export class World {
   readonly light = new Map<string, Uint8Array>();
   /** 每区块非零光照格计数（快速判断 3×3 邻域是否有光） */
   private lightCount = new Map<string, number>();
+  /** 热路径：整数键 → Uint8Array，避免 getBlock 每次分配字符串 */
+  private chunksFast = new Map<number, Uint8Array>();
+  private lightFast = new Map<number, Uint8Array>();
 
   constructor(public readonly reg: BlockRegistry) {}
 
   hasChunk(cx: number, cz: number): boolean {
-    return this.chunks.has(chunkKey(cx, cz));
+    return this.chunksFast.has(packKey(cx, cz));
+  }
+
+  /** 按预解算的 (cx,cz) 取 chunk 数组，未加载返回 null —— 热路径走此分支 */
+  chunkAt(cx: number, cz: number): Uint8Array | null {
+    return this.chunksFast.get(packKey(cx, cz)) ?? null;
   }
 
   setChunk(cx: number, cz: number, data: Uint8Array): void {
     const key = chunkKey(cx, cz);
+    const fkey = packKey(cx, cz);
     this.chunks.set(key, data);
+    this.chunksFast.set(fkey, data);
     this.light.set(key, new Uint8Array(VOLUME));
+    this.lightFast.set(fkey, this.light.get(key)!);
     this.lightCount.set(key, 0);
 
     // 1) 区块内光源播种（自然地形无光源；读档的修改区块可能含荧石）
@@ -63,7 +81,7 @@ export class World {
       [0, 1, 0, CHUNK_Z - 1],
     ];
     for (const [dx, dz, nEdge, myEdge] of faces) {
-      const nLight = this.light.get(chunkKey(cx + dx, cz + dz));
+      const nLight = this.lightFast.get(packKey(cx + dx, cz + dz));
       if (!nLight) continue;
       const alongX = dx !== 0; // 邻区在 x 方向：遍历其 lx=nEdge 的面
       for (let y = 0; y < CHUNK_Y; y++) {
@@ -84,8 +102,11 @@ export class World {
 
   deleteChunk(cx: number, cz: number): void {
     const key = chunkKey(cx, cz);
+    const fkey = packKey(cx, cz);
     this.chunks.delete(key);
     this.light.delete(key);
+    this.chunksFast.delete(fkey);
+    this.lightFast.delete(fkey);
     this.lightCount.delete(key);
   }
 
@@ -95,9 +116,12 @@ export class World {
   getBlock(wx: number, y: number, wz: number): number {
     if (y < 0) return this.reg.id('bedrock');
     if (y >= CHUNK_Y) return AIR;
-    const cx = Math.floor(wx / CHUNK_X);
-    const cz = Math.floor(wz / CHUNK_Z);
-    const chunk = this.chunks.get(chunkKey(cx, cz));
+    let cx: number, cz: number;
+    if (wx >= 0) cx = (wx / CHUNK_X) | 0;
+    else cx = -((-wx / CHUNK_X) | 0) - (wx % CHUNK_X ? 1 : 0);
+    if (wz >= 0) cz = (wz / CHUNK_Z) | 0;
+    else cz = -((-wz / CHUNK_Z) | 0) - (wz % CHUNK_Z ? 1 : 0);
+    const chunk = this.chunksFast.get(packKey(cx, cz));
     if (!chunk) return AIR;
     const lx = wx - cx * CHUNK_X;
     const lz = wz - cz * CHUNK_Z;
@@ -107,9 +131,12 @@ export class World {
   /** 读取方块光（未加载/越界视为 0） */
   getLight(wx: number, y: number, wz: number): number {
     if (y < 0 || y >= CHUNK_Y) return 0;
-    const cx = Math.floor(wx / CHUNK_X);
-    const cz = Math.floor(wz / CHUNK_Z);
-    const arr = this.light.get(chunkKey(cx, cz));
+    let cx: number, cz: number;
+    if (wx >= 0) cx = (wx / CHUNK_X) | 0;
+    else cx = -((-wx / CHUNK_X) | 0) - (wx % CHUNK_X ? 1 : 0);
+    if (wz >= 0) cz = (wz / CHUNK_Z) | 0;
+    else cz = -((-wz / CHUNK_Z) | 0) - (wz % CHUNK_Z ? 1 : 0);
+    const arr = this.lightFast.get(packKey(cx, cz));
     if (!arr) return 0;
     return arr[lidx(wx - cx * CHUNK_X, y, wz - cz * CHUNK_Z)];
   }
@@ -117,19 +144,23 @@ export class World {
   /** 写入方块光并维护非零计数（仅已加载区块；光照是否阻挡由调用方判断） */
   setLight(wx: number, y: number, wz: number, v: number): boolean {
     if (y < 0 || y >= CHUNK_Y) return false;
-    const cx = Math.floor(wx / CHUNK_X);
-    const cz = Math.floor(wz / CHUNK_Z);
-    const key = chunkKey(cx, cz);
-    const arr = this.light.get(key);
+    let cx: number, cz: number;
+    if (wx >= 0) cx = (wx / CHUNK_X) | 0;
+    else cx = -((-wx / CHUNK_X) | 0) - (wx % CHUNK_X ? 1 : 0);
+    if (wz >= 0) cz = (wz / CHUNK_Z) | 0;
+    else cz = -((-wz / CHUNK_Z) | 0) - (wz % CHUNK_Z ? 1 : 0);
+    const fkey = packKey(cx, cz);
+    const arr = this.lightFast.get(fkey);
     if (!arr) return false; // 光不写入未加载区块
     const i = lidx(wx - cx * CHUNK_X, y, wz - cz * CHUNK_Z);
     const old = arr[i];
     if (old === v) return true;
     arr[i] = v;
+    const skey = chunkKey(cx, cz);
     if (old === 0 && v > 0)
-      this.lightCount.set(key, (this.lightCount.get(key) ?? 0) + 1);
+      this.lightCount.set(skey, (this.lightCount.get(skey) ?? 0) + 1);
     else if (old > 0 && v === 0)
-      this.lightCount.set(key, (this.lightCount.get(key) ?? 0) - 1);
+      this.lightCount.set(skey, (this.lightCount.get(skey) ?? 0) - 1);
     return true;
   }
 
@@ -150,9 +181,12 @@ export class World {
 
   setBlock(wx: number, y: number, wz: number, id: number): BlockEdit | null {
     if (y < 0 || y >= CHUNK_Y) return null;
-    const cx = Math.floor(wx / CHUNK_X);
-    const cz = Math.floor(wz / CHUNK_Z);
-    const chunk = this.chunks.get(chunkKey(cx, cz));
+    let cx: number, cz: number;
+    if (wx >= 0) cx = (wx / CHUNK_X) | 0;
+    else cx = -((-wx / CHUNK_X) | 0) - (wx % CHUNK_X ? 1 : 0);
+    if (wz >= 0) cz = (wz / CHUNK_Z) | 0;
+    else cz = -((-wz / CHUNK_Z) | 0) - (wz % CHUNK_Z ? 1 : 0);
+    const chunk = this.chunksFast.get(packKey(cx, cz));
     if (!chunk) return null;
     const lx = wx - cx * CHUNK_X;
     const lz = wz - cz * CHUNK_Z;

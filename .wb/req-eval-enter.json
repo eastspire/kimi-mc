@@ -1,1 +1,0 @@
-{"action":"evaluate","args":{"code":"(function(){const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('点击')||x.textContent.includes('进入'));if(b){b.click();return 'clicked: '+b.textContent.trim();}return 'no enter button; buttons='+[...document.querySelectorAll('button')].map(x=>x.textContent.trim()).join('|');})()"},"session":"mc-web-check"}

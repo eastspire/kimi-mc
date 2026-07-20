@@ -5,7 +5,14 @@
 // ============================================================
 
 export type FaceName = 'down' | 'up' | 'north' | 'south' | 'west' | 'east';
-export const FACE_NAMES: readonly FaceName[] = ['down', 'up', 'north', 'south', 'west', 'east'];
+export const FACE_NAMES: readonly FaceName[] = [
+  'down',
+  'up',
+  'north',
+  'south',
+  'west',
+  'east',
+];
 
 export interface ModelFace {
   texture: string;
@@ -76,20 +83,20 @@ export interface BlockDef {
   id: number;
   name: string;
   display: string;
-  solid: boolean;        // 是否参与碰撞
-  occludes: boolean;     // 是否遮挡邻接面 / 产生 AO
-  cullSame: boolean;     // 同类型相邻时剔除共享面（树叶/水/玻璃）
+  solid: boolean; // 是否参与碰撞
+  occludes: boolean; // 是否遮挡邻接面 / 产生 AO
+  cullSame: boolean; // 同类型相邻时剔除共享面（树叶/水/玻璃）
   fluid: boolean;
-  selectable: boolean;   // 能否被准星选中
-  replaceable: boolean;  // 放置时能否被直接替换（植物）
+  selectable: boolean; // 能否被准星选中
+  replaceable: boolean; // 放置时能否被直接替换（植物）
   renderLayer: 'solid' | 'cutout' | 'translucent';
-  hardness: number;      // <0 不可破坏，0 瞬间破坏
+  hardness: number; // <0 不可破坏，0 瞬间破坏
   luminance: number;
   /** 重力方块（沙子/沙砾） */
   falling: boolean;
   /** 水位等级 0..8；非流体为 0。fluid=true 时 0=水源、1..7=扩散、8=下落柱 */
   waterLevel: number;
-  fullCube: boolean;     // 单元素 16^3 六面 → 走贪心合并快路径
+  fullCube: boolean; // 单元素 16^3 六面 → 走贪心合并快路径
   faceTiles: Partial<Record<FaceName, number>>;
   elements: ElementDef[];
 }
@@ -123,29 +130,69 @@ export async function loadBlocks(
     throw new Error('blocks.json 格式错误：缺少 blocks 字段');
   }
 
-  // 递归加载模型并解析 parent 链
-  const modelCache = new Map<string, BlockModel>();
+  // 预算全部模型路径 + 解析 parent 链 → 一次性 Promise.all 并行 fetch，
+  // 然后再同步化地解析 blocks。这样启动期不会按方块数触发 N 次串行等待，
+  // 首屏加载时间从 ~N*round-trip 压缩到 ~1*round-trip（无论 N 多大）
+  const allPaths = new Set<string>();
+  const pendingParent = new Set<string>();
+  // 第一遍：所有 spec.model 都进 first-hop；parent 留作第二轮解析
+  for (const spec of Object.values(file.blocks)) {
+    if (!spec.model) continue;
+    if (allPaths.has(spec.model)) continue;
+    allPaths.add(spec.model);
+    pendingParent.add(spec.model);
+  }
+  // 第二轮：每 first-hop 拉一次 JSON 后解开 parent，加入 allPaths
+  // （不再串行等待：所有 first-hop 并发 fetch 完，再一次性 follow parent）
+  const firstWave = await Promise.all(
+    [...allPaths].map((p) =>
+      fetchJson(`${baseUrl}/${p}.json`).then((m) => m as BlockModel),
+    ),
+  );
+  // 建立 path → model 映射；同时 follow parent 链
+  const modelJson = new Map<string, BlockModel>();
+  [...allPaths].forEach((p, i) => modelJson.set(p, firstWave[i]));
+  let added = true;
+  while (added) {
+    added = false;
+    for (const m of modelJson.values()) {
+      const cur = m.parent;
+      if (cur && !modelJson.has(cur)) {
+        allPaths.add(cur);
+        added = true;
+      }
+    }
+    if (!added) break;
+    const newOnes = [...allPaths].filter((p) => !modelJson.has(p));
+    if (newOnes.length === 0) break;
+    const fetched = await Promise.all(
+      newOnes.map((p) =>
+        fetchJson(`${baseUrl}/${p}.json`).then((m) => m as BlockModel),
+      ),
+    );
+    newOnes.forEach((p, i) => modelJson.set(p, fetched[i]));
+  }
 
-  async function getModel(path: string): Promise<BlockModel> {
-    const cached = modelCache.get(path);
-    if (cached) return cached;
-    const model = (await fetchJson(`${baseUrl}/${path}.json`)) as BlockModel;
-    modelCache.set(path, model);
-    return model;
+  const modelCache = modelJson; // 已是已解析 JSON map，不需再 await
+
+  function getModel(path: string): BlockModel {
+    const m = modelCache.get(path);
+    if (!m) throw new Error(`未预取的模型：${path}`);
+    return m;
   }
 
   /** 沿 parent 链合并 textures（子覆盖父），取最靠近子级的 elements */
-  async function resolveModel(path: string): Promise<{
+  function resolveModel(path: string): {
     textures: Record<string, string>;
     elements: ModelElement[];
-  }> {
+  } {
     const chain: BlockModel[] = [];
     let cur: string | undefined = path;
     const seen = new Set<string>();
     while (cur) {
       if (seen.has(cur)) throw new Error(`模型 parent 循环引用：${cur}`);
       seen.add(cur);
-      const m = await getModel(cur);
+      const m = getModel(cur);
       chain.push(m);
       cur = m.parent;
     }
@@ -155,7 +202,10 @@ export async function loadBlocks(
     }
     let elements: ModelElement[] = [];
     for (const m of chain) {
-      if (m.elements) { elements = m.elements; break; }
+      if (m.elements) {
+        elements = m.elements;
+        break;
+      }
     }
     return { textures, elements };
   }
@@ -172,11 +222,13 @@ export async function loadBlocks(
       if (seen.has(cur)) throw new Error(`${where}：贴图引用循环 ${ref}`);
       seen.add(cur);
       const next = textures[cur.slice(1)];
-      if (next === undefined) throw new Error(`${where}：未定义的贴图引用 ${cur}`);
+      if (next === undefined)
+        throw new Error(`${where}：未定义的贴图引用 ${cur}`);
       cur = next;
     }
     const tile = tileIndex.get(cur);
-    if (tile === undefined) throw new Error(`${where}：图集中不存在贴图 "${cur}"`);
+    if (tile === undefined)
+      throw new Error(`${where}：图集中不存在贴图 "${cur}"`);
     return tile;
   }
 
@@ -218,7 +270,12 @@ export async function loadBlocks(
             tile: resolveTile(face.texture, textures, where),
             cullface: face.cullface as FaceName | undefined,
             uv: face.uv
-              ? [face.uv[0] / 16, face.uv[1] / 16, face.uv[2] / 16, face.uv[3] / 16]
+              ? [
+                  face.uv[0] / 16,
+                  face.uv[1] / 16,
+                  face.uv[2] / 16,
+                  face.uv[3] / 16,
+                ]
               : undefined,
           };
         }
@@ -229,7 +286,11 @@ export async function loadBlocks(
             ? {
                 axis: 'y',
                 angle: el.rotation.angle,
-                origin: [el.rotation.origin[0], el.rotation.origin[1], el.rotation.origin[2]],
+                origin: [
+                  el.rotation.origin[0],
+                  el.rotation.origin[1],
+                  el.rotation.origin[2],
+                ],
               }
             : undefined,
           faces,
@@ -245,7 +306,8 @@ export async function loadBlocks(
         FACE_NAMES.every((f) => base.elements[0].faces[f])
       ) {
         base.fullCube = true;
-        for (const f of FACE_NAMES) base.faceTiles[f] = base.elements[0].faces[f]!.tile;
+        for (const f of FACE_NAMES)
+          base.faceTiles[f] = base.elements[0].faces[f]!.tile;
       }
     }
 

@@ -1,1 +1,0 @@
-{"action":"evaluate","args":{"code":"(function(){const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('创建新世界'));if(b){b.click();return 'clicked: '+b.textContent.trim();}return 'not found: '+[...document.querySelectorAll('button')].map(x=>x.textContent.trim()).join('|');})()"},"session":"mc-web-check"}

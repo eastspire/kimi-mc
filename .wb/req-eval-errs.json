@@ -1,1 +1,0 @@
-{"action":"evaluate","args":{"code":"(function(){return JSON.stringify({errs:(window.__errs||[]).slice(0,10),errCount:(window.__errs||[]).length,progress:document.getElementById('overlay-progress-text').textContent});})()"},"session":"mc-web-check"}

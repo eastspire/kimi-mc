@@ -95,8 +95,11 @@ export class Sky {
   private stars: THREE.Points;
   private starMat: THREE.PointsMaterial;
   private underwater = false;
-  private nether = false;
+  /** 当前维度氛围 */
+  private atmos: 'overworld' | 'nether' | 'end' | 'aether' = 'overworld';
   private readonly NETHER_FOG = new THREE.Color(0x3a1208); // 下界暗红雾
+  private readonly END_FOG = new THREE.Color(0x0b0714); // 末地幽紫黑雾
+  private readonly AETHER_FOG = new THREE.Color(0xbfe3ff); // 天堂明蓝雾
   private readonly dirV = new THREE.Vector3(); // 复用，避免每帧分配
   /** 渲染距离（区块），运行时可调，雾与天体距离随之更新 */
   private dist = RENDER_DIST;
@@ -137,7 +140,7 @@ export class Sky {
     const sunY = Math.sin(ang); // >0 白天
     const sunX = Math.cos(ang);
 
-    if (this.nether) {
+    if (this.atmos === 'nether') {
       // 下界：无昼夜，锁定昏暗光照 + 暗红雾，隐藏天体星辰
       this.daylight = 0.35;
       (this.scene.fog as THREE.Fog).color.copy(this.NETHER_FOG);
@@ -145,6 +148,37 @@ export class Sky {
       this.sun.visible = false;
       this.moon.visible = false;
       this.stars.visible = false;
+      for (const m of tinted) (m as THREE.MeshBasicMaterial).color.setScalar(1);
+      return;
+    }
+    if (this.atmos === 'end') {
+      // 末地：恒暗幽紫雾 + 满天繁星（无日无月无昼夜）
+      this.daylight = 0.42;
+      (this.scene.fog as THREE.Fog).color.copy(this.END_FOG);
+      this.renderer.setClearColor(this.END_FOG);
+      this.sun.visible = false;
+      this.moon.visible = false;
+      this.stars.position.copy(camera.position);
+      this.stars.rotation.y = ang * 0.05;
+      this.starMat.opacity = 0.9;
+      this.stars.visible = true;
+      for (const m of tinted) (m as THREE.MeshBasicMaterial).color.setScalar(1);
+      return;
+    }
+    if (this.atmos === 'aether') {
+      // 天堂：恒昼明亮（无黑夜），明蓝雾 + 太阳高悬，无星无月
+      this.daylight = 1.0;
+      this.skyColor.copy(this.AETHER_FOG);
+      (this.scene.fog as THREE.Fog).color.copy(this.skyColor);
+      this.renderer.setClearColor(this.skyColor);
+      this.stars.visible = false;
+      this.moon.visible = false;
+      // 太阳固定在正午方位（跟随相机）
+      const dist = this.dist * 16 * 0.9;
+      const dir = this.dirV.set(0.2, 1, 0.15).normalize();
+      this.sun.position.copy(camera.position).addScaledVector(dir, dist);
+      this.sun.lookAt(camera.position);
+      this.sun.visible = !this.underwater;
       for (const m of tinted) (m as THREE.MeshBasicMaterial).color.setScalar(1);
       return;
     }
@@ -208,8 +242,13 @@ export class Sky {
     this.underwater = u;
   }
 
-  /** 下界维度：压暗天空/雾为暗红、隐藏天体星辰、锁定昏暗光照（无昼夜） */
+  /** 维度氛围：主世界/下界/末地/天堂（控制昼夜、雾色、天体星辰） */
+  setAtmosphere(a: 'overworld' | 'nether' | 'end' | 'aether'): void {
+    this.atmos = a;
+  }
+
+  /** 兼容旧接口：下界氛围开关 */
   setNether(n: boolean): void {
-    this.nether = n;
+    this.atmos = n ? 'nether' : 'overworld';
   }
 }

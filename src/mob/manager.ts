@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { World } from '../world/world';
 import type { Particles } from '../fx/particles';
+import type { WorldGen } from '../world/worldgen';
+import { nearestVillage } from '../world/village';
 import { Mob, HOSTILE, SUN_BURNS, CONDITIONAL_HOSTILE, type MobKind } from './mob';
 import { setMobBrightness } from './model';
 
@@ -29,8 +31,12 @@ export class MobManager {
   private mobs: Mob[] = [];
   private spawnTimer = 4;
   private burnTick = 0;
-  /** 当前世界是否为下界（决定刷怪池与地表判定） */
+  /** 当前世界维度（决定刷怪池与地表判定） */
+  private dimension: 'overworld' | 'nether' | 'end' | 'aether' = 'overworld';
+  /** 兼容字段：是否为下界 */
   private nether = false;
+  /** 主世界生成器（村庄聚集判定用）；setWorld 时注入 */
+  private overworldGen: WorldGen | null = null;
 
   constructor(
     private scene: THREE.Scene,
@@ -47,9 +53,18 @@ export class MobManager {
   }
 
   /** 维度切换时换绑世界并清除全部生物（旧维度生物不跨维度；新维度重新刷） */
-  setWorld(w: World, nether = false): void {
+  setWorld(
+    w: World,
+    nether = false,
+    overworldGen: WorldGen | null = null,
+    dimension: 'overworld' | 'nether' | 'end' | 'aether' = nether
+      ? 'nether'
+      : 'overworld',
+  ): void {
     this.world = w;
     this.nether = nether;
+    this.dimension = dimension;
+    this.overworldGen = overworldGen;
     for (const m of this.mobs) this.scene.remove(m.model.group);
     this.mobs.length = 0;
   }
@@ -140,10 +155,19 @@ export class MobManager {
   }
 
   private trySpawn(px: number, pz: number, kind: MobKind): void {
-    const ang = Math.random() * Math.PI * 2;
-    const dist = SPAWN_MIN + Math.random() * (SPAWN_MAX - SPAWN_MIN);
-    const bx = Math.floor(px + Math.cos(ang) * dist);
-    const bz = Math.floor(pz + Math.sin(ang) * dist);
+    let ang = Math.random() * Math.PI * 2;
+    let dist = SPAWN_MIN + Math.random() * (SPAWN_MAX - SPAWN_MIN);
+    let bx = Math.floor(px + Math.cos(ang) * dist);
+    let bz = Math.floor(pz + Math.sin(ang) * dist);
+    // 村民：优先在最近村庄中心附近聚集生成（MC 村庄人口）
+    if (kind === 'villager' && this.overworldGen) {
+      const v = nearestVillage(this.overworldGen, px, pz);
+      if (!v) return; // 附近无村庄不刷村民
+      ang = Math.random() * Math.PI * 2;
+      const vd = 2 + Math.random() * 10;
+      bx = Math.floor(v.x + Math.cos(ang) * vd);
+      bz = Math.floor(v.z + Math.sin(ang) * vd);
+    }
     if (!this.world.hasChunk(Math.floor(bx / 16), Math.floor(bz / 16))) return;
 
     // 恶魂：空中生成（下界大空腔），无需地表；在 60~90 高度找净空
@@ -174,7 +198,9 @@ export class MobManager {
 
     // 自上而下找第一个实体面：要求上方足够净空（按生物高度）
     const needClear = kind === 'enderman' ? 3 : 2;
-    for (let y = 110; y > (this.nether ? 12 : 40); y--) {
+    const minY =
+      this.nether ? 12 : this.dimension === 'end' || this.dimension === 'aether' ? 40 : 40;
+    for (let y = 118; y > minY; y--) {
       if (!this.world.isSolid(bx, y, bz)) continue;
       let blocked = false;
       for (let c = 1; c <= needClear; c++) {
@@ -186,10 +212,15 @@ export class MobManager {
       if (blocked) return; // 顶面被堵（树上/悬空物下），本轮放弃
       const ground = this.world.getBlock(bx, y, bz);
       if (this.world.reg.isWater(ground) || ground === leavesId) return;
-      // 猪灵：下界岩/灵魂沙地表；主世界被动生物仅草方块
+      // 猪灵：下界岩/灵魂沙地表；主世界被动生物仅草方块；末地/天堂地表任意实体
       if (kind === 'zombie_piglin') {
         if (ground !== netherrackId && ground !== soulSandId) return;
-      } else if (!HOSTILE.has(kind) && kind !== 'enderman' && ground !== grassId)
+      } else if (
+        this.dimension === 'overworld' &&
+        !HOSTILE.has(kind) &&
+        kind !== 'enderman' &&
+        ground !== grassId
+      )
         return;
       this.spawn(kind, bx + 0.5, y + 1.01, bz + 0.5);
       return;
@@ -360,11 +391,11 @@ export class MobManager {
       }
     }
 
-    // 生成节律：4~8s 一次尝试；主世界白天刷被动/夜晚刷敌对，下界刷猪灵+恶魂
+    // 生成节律：4~8s 一次尝试；按维度选刷怪池
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       this.spawnTimer = 4 + Math.random() * 4;
-      if (this.nether) {
+      if (this.dimension === 'nether') {
         // 下界刷怪池：僵尸猪灵为主、恶魂较稀（MC 权重）
         const NETHER_POOL: MobKind[] = [
           'zombie_piglin', 'zombie_piglin', 'zombie_piglin', 'zombie_piglin',
@@ -374,6 +405,22 @@ export class MobManager {
         let n = 0;
         for (const m of this.mobs) if (!m.dying) n++;
         if (n < MAX_ZOMBIES) this.trySpawn(px, pz, kind);
+        return;
+      }
+      if (this.dimension === 'end') {
+        // 末地刷怪池：末影人成群（MC 主岛大量末影人）
+        let n = 0;
+        for (const m of this.mobs) if (!m.dying && m.kind === 'enderman') n++;
+        if (n < 10) this.trySpawn(px, pz, 'enderman');
+        return;
+      }
+      if (this.dimension === 'aether') {
+        // 天堂刷怪池：仅和平生物（猪/羊/鸡），无敌对
+        const AETHER_POOL: MobKind[] = ['pig', 'sheep', 'chicken', 'cow'];
+        const kind = AETHER_POOL[Math.floor(Math.random() * AETHER_POOL.length)];
+        let n = 0;
+        for (const m of this.mobs) if (!m.dying) n++;
+        if (n < MAX_PASSIVE) this.trySpawn(px, pz, kind);
         return;
       }
       const passive = daylight > 0.55;

@@ -62,14 +62,26 @@ export interface SaveMeta {
   /** 床设置的重生点；缺省 → 世界出生点 */
   spawnPoint?: { x: number; y: number; z: number };
   /** 玩家所在维度；缺省 → overworld */
-  dimension?: 'overworld' | 'nether';
+  dimension?: 'overworld' | 'nether' | 'end' | 'aether';
   /** 下界修改过的区块（键 "cx,cz" → RLE 字节，存档外单独携带，避免与主世界键冲突） */
   netherChunks?: Map<string, Uint8Array>;
+  /** 末地修改过的区块 */
+  endChunks?: Map<string, Uint8Array>;
+  /** 天堂修改过的区块 */
+  aetherChunks?: Map<string, Uint8Array>;
+  /** 地图已探索数据（维度名 → Map<"cx,cz", 16×16 颜色字节>） */
+  maps?: Record<string, Map<string, Uint8Array>>;
+  /** 末影龙是否已被击败（击败后不再生成，末地留返回传送门） */
+  dragonDefeated?: boolean;
 }
 
-/** meta 入库前的线性格式：netherChunks 的 Map 转为可结构化克隆的 [key, RLE][] */
-interface StoredMeta extends Omit<SaveMeta, 'netherChunks'> {
+/** meta 入库前的线性格式：Map 转可结构化克隆的 [key, RLE][] */
+interface StoredMeta extends Omit<SaveMeta, 'netherChunks' | 'endChunks' | 'aetherChunks' | 'maps'> {
   netherChunks?: [string, Uint8Array][];
+  endChunks?: [string, Uint8Array][];
+  aetherChunks?: [string, Uint8Array][];
+  /** 地图：维度名 → [key, 值][] 线性化（key 为区块 "cx,cz"，值为该区块 16×16 颜色字节） */
+  maps?: Record<string, [string, Uint8Array][]>;
 }
 
 export interface LoadedSave {
@@ -166,11 +178,37 @@ export class Persistence {
       chunks.set(String(keys[i]), rleDecode(raw));
     }
     // 下界修改集解压回 Map
-    const meta: SaveMeta = { ...stored, netherChunks: undefined };
+    const meta: SaveMeta = {
+      ...stored,
+      netherChunks: undefined,
+      endChunks: undefined,
+      aetherChunks: undefined,
+      maps: undefined,
+    };
     if (stored.netherChunks) {
       const nm = new Map<string, Uint8Array>();
       for (const [k, raw] of stored.netherChunks) nm.set(k, rleDecode(raw));
       meta.netherChunks = nm;
+    }
+    if (stored.endChunks) {
+      const nm = new Map<string, Uint8Array>();
+      for (const [k, raw] of stored.endChunks) nm.set(k, rleDecode(raw));
+      meta.endChunks = nm;
+    }
+    if (stored.aetherChunks) {
+      const nm = new Map<string, Uint8Array>();
+      for (const [k, raw] of stored.aetherChunks) nm.set(k, rleDecode(raw));
+      meta.aetherChunks = nm;
+    }
+    // 地图已探索数据（直接是 [key, bytes][]，无需 RLE）
+    if (stored.maps) {
+      const mm: Record<string, Map<string, Uint8Array>> = {};
+      for (const [dim, entries] of Object.entries(stored.maps)) {
+        const m = new Map<string, Uint8Array>();
+        for (const [k, v] of entries) m.set(k, v);
+        mm[dim] = m;
+      }
+      meta.maps = mm;
     }
     return { meta, chunks };
   }
@@ -179,12 +217,27 @@ export class Persistence {
   async save(meta: SaveMeta, chunks: Map<string, Uint8Array>): Promise<void> {
     if (!this.db) return;
     const t = this.db.transaction([META_STORE, CHUNK_STORE], 'readwrite');
-    const stored: StoredMeta = { ...meta, netherChunks: undefined };
-    if (meta.netherChunks) {
-      stored.netherChunks = [...meta.netherChunks].map(([k, v]) => [
-        k,
-        rleEncode(v),
-      ]);
+    const stored: StoredMeta = {
+      ...meta,
+      netherChunks: undefined,
+      endChunks: undefined,
+      aetherChunks: undefined,
+      maps: undefined,
+    };
+    const lin = (
+      m: Map<string, Uint8Array> | undefined,
+    ): [string, Uint8Array][] | undefined =>
+      m ? [...m].map(([k, v]) => [k, rleEncode(v)] as [string, Uint8Array]) : undefined;
+    stored.netherChunks = lin(meta.netherChunks);
+    stored.endChunks = lin(meta.endChunks);
+    stored.aetherChunks = lin(meta.aetherChunks);
+    // 地图：直接转 [key, bytes][]（16×16=256B/区块，无需 RLE）
+    if (meta.maps) {
+      const sm: Record<string, [string, Uint8Array][]> = {};
+      for (const [dim, m] of Object.entries(meta.maps)) {
+        sm[dim] = [...m].map(([k, v]) => [k, v] as [string, Uint8Array]);
+      }
+      stored.maps = sm;
     }
     t.objectStore(META_STORE).put(stored, META_KEY);
     const store = t.objectStore(CHUNK_STORE);

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 
 export const TILE_SIZE = 16;
 export const ATLAS_COLS = 8;
-export const ATLAS_ROWS = 12;
+export const ATLAS_ROWS = 14;
 
 export const TILE_NAMES = [
   'grass_top',
@@ -89,6 +89,22 @@ export const TILE_NAMES = [
   'soul_sand',
   'lava_still',
   'nether_portal',
+  // ---- 末地维度 ----
+  'end_stone',
+  'end_stone_bricks',
+  'end_portal',
+  'end_portal_frame',
+  'end_portal_frame_eye',
+  'end_crystal',
+  'dragon_egg',
+  // ---- 天堂维度 ----
+  'aether_grass_top',
+  'aether_grass_side',
+  'aether_dirt',
+  'holystone',
+  'aether_portal',
+  'aether_leaves',
+  'aether_log',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -1069,6 +1085,204 @@ const PAINTERS: Record<TileName, Painter> = {
     // 亮紫闪点
     for (let i = 0; i < 14; i++)
       px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#c07af0');
+  },
+  // ---- 末地石：淡黄灰底 + 浅色杂斑（MC 末地主岛岩） ----
+  end_stone: (ctx, _ox, _oy, rnd) => {
+    speckle(
+      ctx,
+      rnd,
+      '#d8d8a8',
+      ['#c8c898', '#e4e4b8', '#bcbc8a', '#dcdcb0'],
+      0.5,
+    );
+    for (let i = 0; i < 7; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#a8a878'); // 暗斑
+  },
+  // ---- 末地石砖：末地石色 + 砖缝 ----
+  end_stone_bricks: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#cfcfa0', ['#c2c292', '#dadab0', '#b4b486'], 0.4);
+    // 砖缝：两条横缝 + 交错竖缝
+    for (let x = 0; x < 16; x++) {
+      px(ctx, x, 5, '#8a8a66');
+      px(ctx, x, 11, '#8a8a66');
+    }
+    for (let y = 0; y <= 5; y++) px(ctx, 7, y, '#8a8a66');
+    for (let y = 6; y <= 11; y++) px(ctx, 3, y, '#8a8a66');
+    for (let y = 6; y <= 11; y++) px(ctx, 11, y, '#8a8a66');
+    for (let y = 12; y < 16; y++) px(ctx, 7, y, '#8a8a66');
+  },
+  // ---- 末地传送门：星空虚空（深黑 + 星点闪烁），十字板镂空底 ----
+  end_portal: (ctx, _ox, _oy, rnd) => {
+    ctx.clearRect(0, 0, 16, 16);
+    ctx.fillStyle = '#05050f';
+    ctx.fillRect(0, 0, 16, 16);
+    // 星点（大小/亮度不一）
+    for (let i = 0; i < 22; i++) {
+      const x = (rnd() * 16) | 0;
+      const y = (rnd() * 16) | 0;
+      const b = rnd();
+      px(ctx, x, y, b > 0.7 ? '#c8d8ff' : b > 0.4 ? '#8a9ad0' : '#4a5a90');
+      if (b > 0.85) {
+        // 个别亮星带十字光晕
+        px(ctx, x - 1, y, '#6a7ab0');
+        px(ctx, x + 1, y, '#6a7ab0');
+        px(ctx, x, y - 1, '#6a7ab0');
+        px(ctx, x, y + 1, '#6a7ab0');
+      }
+    }
+  },
+  // ---- 末地传送门框架（顶面）：石砖底 + 中央凹槽 ----
+  end_portal_frame: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#8a9078', ['#7d8368', '#969c84', '#6f7558'], 0.5);
+    // 顶面凹槽（眼位未激活）
+    ctx.fillStyle = '#3a4030';
+    ctx.fillRect(3, 3, 10, 10);
+    ctx.fillStyle = '#242a1e';
+    ctx.fillRect(4, 4, 8, 8);
+    // 边框高光
+    for (let x = 0; x < 16; x++) {
+      px(ctx, x, 0, '#aab098');
+      px(ctx, x, 15, '#565c46');
+    }
+    for (let y = 0; y < 16; y++) {
+      px(ctx, 0, y, '#aab098');
+      px(ctx, 15, y, '#565c46');
+    }
+  },
+  // ---- 末地传送门框架（顶面，已嵌末影之眼）：凹槽内青色眼瞳 ----
+  end_portal_frame_eye: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#8a9078', ['#7d8368', '#969c84', '#6f7558'], 0.5);
+    for (let x = 0; x < 16; x++) {
+      px(ctx, x, 0, '#aab098');
+      px(ctx, x, 15, '#565c46');
+    }
+    for (let y = 0; y < 16; y++) {
+      px(ctx, 0, y, '#aab098');
+      px(ctx, 15, y, '#565c46');
+    }
+    // 末影之眼：青绿虹膜 + 深瞳 + 高光
+    ctx.fillStyle = '#1a5a4a';
+    ctx.fillRect(4, 4, 8, 8);
+    ctx.fillStyle = '#2a9a7a';
+    ctx.fillRect(5, 5, 6, 6);
+    ctx.fillStyle = '#0e3a34';
+    ctx.fillRect(6, 6, 4, 4);
+    px(ctx, 6, 6, '#bff0e0'); // 高光
+  },
+  // ---- 末影水晶：透明紫晶体（基座上方悬浮体） ----
+  end_crystal: (ctx, _ox, _oy, rnd) => {
+    ctx.clearRect(0, 0, 16, 16);
+    // 菱形晶体
+    const c = '#c98af0';
+    const dark = '#9a5ad0';
+    const rows = [1, 3, 5, 7, 9, 9, 7, 5, 3, 1];
+    for (let i = 0; i < rows.length; i++) {
+      const w = rows[i];
+      const x0 = 8 - (w >> 1);
+      ctx.fillStyle = i < 4 ? c : dark;
+      ctx.fillRect(x0, 3 + i, w, 1);
+    }
+    px(ctx, 8, 6, '#f0d8ff'); // 高光
+    px(ctx, 7, 7, '#e8c8ff');
+    // 外围微光
+    if (rnd() < 1) {
+      px(ctx, 8, 1, '#b47ae0');
+      px(ctx, 8, 14, '#b47ae0');
+    }
+  },
+  // ---- 龙蛋：深紫近黑卵 + 紫斑 ----
+  dragon_egg: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#1a1024', ['#120a1a', '#241432', '#0d0714'], 0.5);
+    for (let i = 0; i < 10; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#4a2a70'); // 紫斑
+    for (let i = 0; i < 4; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#7a4ab0'); // 亮紫点
+  },
+  // ---- 天堂草（顶）：青碧草皮，比主世界更鲜亮偏青 ----
+  aether_grass_top: (ctx, _ox, _oy, rnd) => {
+    speckle(
+      ctx,
+      rnd,
+      '#7fd4a8',
+      ['#6cc898', '#8fe0b6', '#5fbc88', '#9ae8c4'],
+      0.55,
+    );
+  },
+  // ---- 天堂草（侧）：云顶泥底 + 青绿草冠 ----
+  aether_grass_side: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#c9b98f', ['#bda982', '#d4c49c', '#b09a74'], 0.5);
+    for (let x = 0; x < 16; x++) {
+      const depth = 2 + ((rnd() * 3) | 0);
+      for (let y = 0; y <= depth; y++)
+        px(ctx, x, y, rnd() < 0.3 ? '#6cc898' : '#7fd4a8');
+    }
+  },
+  // ---- 天堂泥土：浅云褐 ----
+  aether_dirt: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#c9b98f', ['#bda982', '#d4c49c', '#b09a74', '#e0d0a8'], 0.5);
+    for (let i = 0; i < 5; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#a89468');
+  },
+  // ---- 圣石：暖白岩体 + 淡金纹理 ----
+  holystone: (ctx, _ox, _oy, rnd) => {
+    speckle(
+      ctx,
+      rnd,
+      '#d8d4c4',
+      ['#ccc8b6', '#e4e0d2', '#c0bcaa', '#dcd8ca'],
+      0.45,
+    );
+    for (let i = 0; i < 4; i++) {
+      let x = (rnd() * 14) | 0;
+      let y = (rnd() * 14) | 0;
+      for (let s = 0; s < 4; s++) {
+        px(ctx, x, y, '#b0ac98');
+        x += rnd() < 0.5 ? 1 : 0;
+        y += rnd() < 0.5 ? 1 : 0;
+        if (x > 15 || y > 15) break;
+      }
+    }
+  },
+  // ---- 天堂传送门：青金流光（类似下界门但明亮），十字板镂空底 ----
+  aether_portal: (ctx, _ox, _oy, rnd) => {
+    ctx.clearRect(0, 0, 16, 16);
+    for (let x = 0; x < 16; x++) {
+      const phase = Math.sin(x * 0.9) * 2;
+      for (let y = 0; y < 16; y++) {
+        const w = Math.sin((y + phase) * 0.8 + x * 0.5);
+        if (w > 0.2) px(ctx, x, y, '#5ad4e8');
+        else if (w > -0.2) px(ctx, x, y, '#3aa8d8');
+        else if (rnd() < 0.5) px(ctx, x, y, '#2a78b8');
+      }
+    }
+    for (let i = 0; i < 14; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#c8f4ff');
+  },
+  // ---- 天堂树叶：亮青绿（更透亮） ----
+  aether_leaves: (ctx, _ox, _oy, rnd) => {
+    ctx.fillStyle = '#3f9a6a';
+    ctx.fillRect(0, 0, 16, 16);
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        const r = rnd();
+        if (r < 0.28) px(ctx, x, y, '#358a5c');
+        else if (r < 0.42) px(ctx, x, y, '#52b47c');
+        else if (r < 0.5) px(ctx, x, y, '#2d7a4e');
+      }
+    }
+  },
+  // ---- 天堂原木（侧）：浅金边皮 ----
+  aether_log: (ctx, _ox, _oy, rnd) => {
+    ctx.fillStyle = '#a8955e';
+    ctx.fillRect(0, 0, 16, 16);
+    for (let x = 0; x < 16; x++) {
+      const c = x % 4 === 0 ? '#8f7d4c' : x % 4 === 2 ? '#b5a26a' : '#a8955e';
+      for (let y = 0; y < 16; y++) {
+        px(ctx, x, y, rnd() < 0.12 ? '#7d6c40' : c);
+      }
+    }
+    for (let i = 0; i < 4; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#6d5c34');
   },
 };
 

@@ -367,7 +367,12 @@ export class ChunkManager {
     this.queueMesh(cx + 1, cz);
     this.queueMesh(cx, cz - 1);
     this.queueMesh(cx, cz + 1);
+    // 地图探索：新区块落地即采样记录
+    this.onChunkExplored?.(cx, cz);
   }
+
+  /** 区块首次落地（生成/读档）时的回调（地图探索记录用） */
+  onChunkExplored: ((cx: number, cz: number) => void) | null = null;
 
   /**
    * 每帧驱动。applyBudget：最多上传多少网格；

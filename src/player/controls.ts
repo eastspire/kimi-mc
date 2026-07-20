@@ -13,6 +13,8 @@ export interface ControlEvents {
   onSprint: () => void;
   /** E 打开创造模式物品栏 */
   onInventory: () => void;
+  /** M 打开/关闭全屏地图 */
+  onMap: () => void;
 }
 
 const MOUSE_SENS = 0.0022;
@@ -59,6 +61,11 @@ export class Controls {
       if (e.code === 'F3') {
         e.preventDefault();
         if (this.locked) this.events.onDebugToggle();
+        return;
+      }
+      // 地图开关：锁定时开、解锁时关（地图打开需释放鼠标拖拽）
+      if (e.code === 'KeyM' && !e.repeat) {
+        this.events.onMap();
         return;
       }
       if (!this.locked || e.repeat) return;

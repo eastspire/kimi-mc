@@ -1141,4 +1141,140 @@ export function setMobBrightness(d: number): void {
   if (zombiePiglinAssets) zombiePiglinAssets.material.color.setScalar(d);
   if (ghastAssets) ghastAssets.material.color.setScalar(d);
   if (villagerAssets) villagerAssets.material.color.setScalar(d);
+  if (dragonAssets) dragonAssets.material.color.setScalar(d);
+}
+
+// ============================================================
+// 末影龙模型：大型飞行 BOSS，独立拼装（不走普通 Mob 管线）
+//  - 黑色鳞身 + 紫斑；长颈、巨头、双翼（翅膀扇动）、长尾
+//  - 整体缩放 ~3 倍，翼展约 8 格；正面朝 -Z
+// ============================================================
+
+let dragonAssets: MobAssets | null = null;
+
+function paintDragon(ctx: CanvasRenderingContext2D): void {
+  const f = (x: number, y: number, w: number, h: number, c: string): void => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const body = '#1a1a22';
+  const dark = '#12121a';
+  const scale = '#26263a';
+  // 全身底
+  f(0, 0, 64, 32, body);
+  // 鳞片杂斑
+  for (let i = 0; i < 90; i++) {
+    const x = Math.floor(Math.random() * 64);
+    const y = Math.floor(Math.random() * 32);
+    f(x, y, 1, 1, Math.random() < 0.5 ? scale : dark);
+  }
+  // 头部区域（左上 16×8）：紫瞳 + 吻部
+  f(2, 2, 12, 6, scale);
+  f(3, 3, 2, 2, '#b048e8'); // 左眼
+  f(11, 3, 2, 2, '#b048e8'); // 右眼
+  f(3, 3, 1, 1, '#e8a8ff');
+  f(11, 3, 1, 1, '#e8a8ff');
+  // 翼膜区域（右侧）：带紫边的翼面
+  f(32, 8, 30, 12, '#201428');
+  for (let i = 0; i < 30; i += 4) f(32 + i, 8, 2, 12, '#2c1a38');
+  f(32, 8, 30, 1, '#4a2a5a'); // 翼缘
+}
+
+function getDragonAssets(): MobAssets {
+  if (!dragonAssets) {
+    dragonAssets = makeAssets(paintDragon, {
+      body: mcBox(16, 8, 32, 0, 8), // 躯干
+      neck: mcBox(6, 6, 10, 0, 0), // 颈节
+      head: mcBox(12, 8, 16, 0, 0), // 头
+      jaw: mcBox(10, 3, 12, 16, 16), // 下颌
+      wing: mcBox(24, 1, 12, 32, 8), // 翼（薄片）
+      tail: mcBox(4, 4, 12, 40, 16), // 尾节
+      leg: mcBox(4, 8, 6, 0, 16), // 后腿
+    });
+  }
+  return dragonAssets;
+}
+
+/** 末影龙模型。翅膀经 arms[0]/arms[1] 暴露供扇动；尾/颈节经 legs 暴露供摆动。 */
+export function buildDragonModel(): MobModel {
+  const a = getDragonAssets();
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+  const add = (m: THREE.Mesh): THREE.Mesh => {
+    meshes.push(m);
+    return m;
+  };
+
+  // 躯干（中心为原点，龙飞行时身体水平）
+  const body = add(new THREE.Mesh(a.geo.body, a.material));
+  group.add(body);
+
+  // 颈 + 头（前方 -Z）
+  const neck = new THREE.Group();
+  neck.position.set(0, 1 * PX, -16 * PX);
+  const neckMesh = add(new THREE.Mesh(a.geo.neck, a.material));
+  neckMesh.position.z = -5 * PX;
+  neck.add(neckMesh);
+  const head = new THREE.Group();
+  head.position.set(0, 1 * PX, -10 * PX);
+  const headMesh = add(new THREE.Mesh(a.geo.head, a.material));
+  headMesh.position.z = -8 * PX;
+  const jaw = add(new THREE.Mesh(a.geo.jaw, a.material));
+  jaw.position.set(0, -5 * PX, -6 * PX);
+  head.add(headMesh, jaw);
+  neck.add(head);
+  group.add(neck);
+
+  // 双翼（身体两侧，绕 z 轴扇动）
+  const wings: THREE.Group[] = [];
+  for (const side of [-1, 1]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 8 * PX, 3 * PX, -4 * PX);
+    const wing = add(new THREE.Mesh(a.geo.wing, a.material));
+    wing.position.x = side * 12 * PX; // 翼面向外延伸
+    pivot.add(wing);
+    group.add(pivot);
+    wings.push(pivot);
+  }
+
+  // 尾（后方 +Z，两节渐细，摆动）
+  const tailSegs: THREE.Group[] = [];
+  let parent: THREE.Group = group;
+  let tz = 16 * PX;
+  for (let i = 0; i < 3; i++) {
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 0.5 * PX, tz);
+    const seg = add(new THREE.Mesh(a.geo.tail, a.material));
+    seg.position.z = 6 * PX;
+    const s = 1 - i * 0.28;
+    seg.scale.setScalar(s);
+    pivot.add(seg);
+    parent.add(pivot);
+    tailSegs.push(pivot);
+    parent = pivot;
+    tz = 11 * PX;
+  }
+
+  // 后腿（下腹两条小短腿）
+  const hindLegs: THREE.Group[] = [];
+  for (const lx of [-4, 4]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(lx * PX, -4 * PX, 8 * PX);
+    const mesh = add(new THREE.Mesh(a.geo.leg, a.material));
+    mesh.position.y = -4 * PX;
+    pivot.add(mesh);
+    group.add(pivot);
+    hindLegs.push(pivot);
+  }
+
+  // 翅膀存 arms（供扇动），尾节+颈存 legs（供摆动）
+  return {
+    group,
+    head,
+    legs: [neck, ...tailSegs],
+    arms: wings,
+    meshes,
+    material: a.material,
+    hurtMaterial: a.hurt,
+  };
 }

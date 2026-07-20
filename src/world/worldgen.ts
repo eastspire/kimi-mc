@@ -1,5 +1,7 @@
 import { BlockRegistry, AIR } from '../core/block-registry';
 import { Noise2D, Noise3D, hash2i, hash3i } from './noise';
+import { applyVillage } from './village';
+import { applyStronghold } from './stronghold';
 
 // ============================================================
 // 世界生成：高度图 + 温度/湿度生物群系 + 洞穴 + 矿石 + 树
@@ -40,8 +42,8 @@ export const enum Biome {
   Forest,
 }
 
-/** 维度：主世界 / 下界（同一 WorldGen 类按维度走不同地形分支） */
-export type Dimension = 'overworld' | 'nether';
+/** 维度：主世界 / 下界 / 末地 / 天堂（同一 WorldGen 类按维度走不同地形分支） */
+export type Dimension = 'overworld' | 'nether' | 'end' | 'aether';
 
 /** 下界岩浆海平面（此高度及以下灌岩浆） */
 export const NETHER_LAVA_LEVEL = 11;
@@ -55,6 +57,8 @@ export class WorldGen {
   private caveNoiseB: Noise3D;
   private treeSalt: number;
   private oreSalt: number;
+  /** 结构生成（村庄/要塞）盐 */
+  readonly structSalt: number;
   /** 维度（主世界地表 / 下界封闭洞穴） */
   readonly dimension: Dimension;
 
@@ -83,6 +87,28 @@ export class WorldGen {
   private idSoulSand: number;
   private idLava: number;
   private idGlowstone: number;
+  // 末地/天堂方块 id 缓存
+  private idEndStone: number;
+  private idEndStoneBricks: number;
+  idEndPortalFrame: number;
+  private idAetherGrass: number;
+  private idAetherDirt: number;
+  private idHolystone: number;
+  private idAetherLog: number;
+  private idAetherLeaves: number;
+  private idObsidian: number;
+  private idEndCrystal: number;
+  // 结构生成（村庄/要塞）方块 id
+  idOakLog: number;
+  idOakPlanks: number;
+  idGlass: number;
+  idCobble: number;
+  idTorch: number;
+  idFarmland: number;
+  idWheat: number[];
+  idStoneBricks: number;
+  idEndPortalFrameEye: number;
+  idEndPortal: number;
 
   constructor(
     public readonly seed: number,
@@ -98,6 +124,7 @@ export class WorldGen {
     this.caveNoiseB = new Noise3D(seed ^ 0x405060);
     this.treeSalt = seed ^ 0x7ee5;
     this.oreSalt = seed ^ 0x0e5;
+    this.structSalt = seed ^ 0x57c7;
 
     this.idStone = reg.id('stone');
     this.idDirt = reg.id('dirt');
@@ -118,6 +145,21 @@ export class WorldGen {
     this.idTallGrass = reg.id('tall_grass');
     this.idFlowerRed = reg.id('flower_red');
     this.idFlowerYellow = reg.id('flower_yellow');
+    // 结构生成（村庄/要塞）用到的方块
+    this.idOakLog = reg.id('oak_log');
+    this.idOakPlanks = reg.id('oak_planks');
+    this.idGlass = reg.id('glass');
+    this.idCobble = reg.id('cobblestone');
+    this.idTorch = reg.id('torch');
+    this.idFarmland = reg.id('farmland');
+    this.idWheat = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => reg.id(`wheat_${i}`));
+    this.idStoneBricks = reg.id('stone_bricks');
+    this.idEndPortalFrameEye = reg.byName.has('end_portal_frame_eye')
+      ? reg.id('end_portal_frame_eye')
+      : reg.id('end_portal_frame');
+    this.idEndPortal = reg.byName.has('end_portal')
+      ? reg.id('end_portal')
+      : reg.id('nether_portal');
     // 下界（缺名回退占位，保证旧 blocks.json 不崩）
     const opt = (n: string, fallback: number): number =>
       reg.byName.has(n) ? reg.id(n) : fallback;
@@ -125,6 +167,21 @@ export class WorldGen {
     this.idSoulSand = opt('soul_sand', this.idDirt);
     this.idLava = opt('lava', this.idWater);
     this.idGlowstone = opt('glowstone', this.idStone);
+    // 末地/天堂（同样带回退，保证向前兼容）
+    this.idEndStone = opt('end_stone', this.idStone);
+    this.idEndStoneBricks = opt('end_stone_bricks', this.idStone);
+    this.idEndPortalFrame = opt('end_portal_frame', this.idStone);
+    this.idAetherGrass = opt('aether_grass', this.idGrass);
+    this.idAetherDirt = opt('aether_dirt', this.idDirt);
+    this.idHolystone = opt('holystone', this.idStone);
+    this.idAetherLog = opt('aether_log', this.idLog);
+    this.idAetherLeaves = opt('aether_leaves', this.idLeaves);
+    this.idObsidian = opt('obsidian', this.idBedrock);
+    this.idEndCrystal = opt('end_crystal', this.idGlowstone);
+    // 供结构生成（要塞/龙岛柱）使用，此处占位避免未用告警
+    void this.idEndStoneBricks;
+    void this.idEndPortalFrame;
+    void this.idObsidian;
   }
 
   /** 地表高度（纯函数，跨区块一致） */
@@ -175,9 +232,16 @@ export class WorldGen {
   }
 
   generateChunk(cx: number, cz: number): Uint8Array {
-    return this.dimension === 'nether'
-      ? this.generateNetherChunk(cx, cz)
-      : this.generateOverworldChunk(cx, cz);
+    switch (this.dimension) {
+      case 'nether':
+        return this.generateNetherChunk(cx, cz);
+      case 'end':
+        return this.generateEndChunk(cx, cz);
+      case 'aether':
+        return this.generateAetherChunk(cx, cz);
+      default:
+        return this.generateOverworldChunk(cx, cz);
+    }
   }
 
   private generateOverworldChunk(cx: number, cz: number): Uint8Array {
@@ -278,6 +342,11 @@ export class WorldGen {
       }
     }
 
+    // ---- 要塞结构（地下，跨区块无缝）：先覆盖出石砖房间/传送门 ----
+    applyStronghold(this, cx, cz, data);
+    // ---- 村庄结构（地表，跨区块无缝）：最后覆盖，优先于地形与树 ----
+    applyVillage(this, cx, cz, data);
+
     return data;
   }
 
@@ -365,6 +434,170 @@ export class WorldGen {
       }
     }
 
+    return data;
+  }
+
+  // ============================================================
+  // 末地维度（MC 简化）：悬浮主岛
+  //  - 中央一座末地石大岛（半径随距离衰减的圆顶），四周散布小岛
+  //  - 全维度无昼夜、无基岩顶底（下方虚空）；基岩仅在岛芯
+  //  - 末地传送门房间由结构生成（要塞）负责，这里只出地形
+  // ============================================================
+  private generateEndChunk(cx: number, cz: number): Uint8Array {
+    const data = new Uint8Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
+    const idx = (x: number, y: number, z: number): number =>
+      x + CHUNK_X * (z + CHUNK_Z * y);
+    const bx = cx * CHUNK_X;
+    const bz = cz * CHUNK_Z;
+    const ISLAND_Y = 64; // 主岛基准高度
+
+    for (let z = 0; z < CHUNK_Z; z++) {
+      for (let x = 0; x < CHUNK_X; x++) {
+        const wx = bx + x;
+        const wz = bz + z;
+        // 距世界中心距离：主岛为中央圆顶（半径 ~64）
+        const dc = Math.hypot(wx, wz);
+        // 岛屿起伏（低频噪声让岛面不平）
+        const bump = this.detailNoise.fbm(wx * 0.05 + 900, wz * 0.05 - 900, 3);
+        // 主岛：中心厚、边缘薄直至消失
+        const mainT = 1 - Math.min(1, dc / 64);
+        // 散布小岛：另一组噪声在大范围内零星凸起
+        const small = this.heightNoise.fbm(wx * 0.02 + 777, wz * 0.02 - 555, 3);
+        const smallT = Math.max(0, (small - 0.55) * 2);
+        const t = Math.max(mainT, smallT * 0.6);
+        if (t <= 0) continue; // 虚空
+
+        // 岛厚：中心最厚 ~14，边缘渐薄；叠加起伏
+        const thick = Math.floor(t * 14 + bump * 3);
+        const top = ISLAND_Y + Math.floor(bump * 2);
+        const bottom = top - Math.max(2, thick);
+        for (let y = bottom; y <= top; y++) {
+          if (y < 1 || y >= CHUNK_Y) continue;
+          // 岛芯个别点放基岩（装饰/传送点基底）；其余末地石
+          data[idx(x, y, z)] =
+            y === bottom && hash3i(wx, y, wz, this.oreSalt ^ 0xe7d) < 0.02
+              ? this.idBedrock
+              : this.idEndStone;
+        }
+      }
+    }
+
+    // ---- 黑曜石柱环绕主岛中心（末影水晶塔，龙战核心）----
+    // 8 根柱绕 (0,0) 半径 30 均布，柱顶放末影水晶；纯函数，跨区块无缝
+    const idObsidian = this.idObsidian;
+    const idCrystal = this.idEndCrystal;
+    const PILLARS = 8;
+    for (let i = 0; i < PILLARS; i++) {
+      const ang = (i / PILLARS) * Math.PI * 2;
+      const px = Math.round(Math.cos(ang) * 30);
+      const pz = Math.round(Math.sin(ang) * 30);
+      // 柱高确定性（20~32）
+      const ph = 20 + Math.floor(hash2i(px, pz, this.structSalt ^ 0xd1) * 12);
+      const baseY = ISLAND_Y + 1;
+      // 只生成本区块覆盖到的柱体方块
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const wx = px + dx;
+          const wz = pz + dz;
+          const lx = wx - bx;
+          const lz = wz - bz;
+          if (lx < 0 || lx >= CHUNK_X || lz < 0 || lz >= CHUNK_Z) continue;
+          for (let dy = 0; dy < ph; dy++) {
+            const y = baseY + dy;
+            if (y < 1 || y >= CHUNK_Y) continue;
+            data[idx(lx, y, lz)] = idObsidian;
+          }
+          // 柱顶：基岩 + 末影水晶（仅中心柱顶）
+          if (dx === 0 && dz === 0) {
+            const topY = baseY + ph;
+            if (topY < CHUNK_Y) data[idx(lx, topY, lz)] = this.idBedrock;
+            if (topY + 1 < CHUNK_Y) data[idx(lx, topY + 1, lz)] = idCrystal;
+          }
+        }
+      }
+    }
+
+    return data;
+  }
+
+  // ============================================================
+  // 天堂维度（Aether 风格简化）：浮空群岛
+  //  - 大片浮空岛（云泥底 + 青绿草面 + 圣石芯），下方虚空
+  //  - 明亮天空；岛上点缀天堂树
+  // ============================================================
+  private generateAetherChunk(cx: number, cz: number): Uint8Array {
+    const data = new Uint8Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
+    const idx = (x: number, y: number, z: number): number =>
+      x + CHUNK_X * (z + CHUNK_Z * y);
+    const bx = cx * CHUNK_X;
+    const bz = cz * CHUNK_Z;
+    const BASE_Y = 72;
+
+    for (let z = 0; z < CHUNK_Z; z++) {
+      for (let x = 0; x < CHUNK_X; x++) {
+        const wx = bx + x;
+        const wz = bz + z;
+        // 浮空岛：低频噪声成片，超过阈值才成岛
+        const land = this.heightNoise.fbm(wx * 0.012 + 1500, wz * 0.012 - 1500, 4);
+        const detail = this.detailNoise.fbm(wx * 0.05 + 77, wz * 0.05 - 33, 3);
+        const t = land - 0.12; // 阈值：只有正区域成岛
+        if (t <= 0) continue;
+
+        // 岛顶高度随低频起伏，岛厚随 t 增大
+        const top = BASE_Y + Math.floor(land * 16 + detail * 3);
+        const thick = Math.max(2, Math.floor(4 + t * 18));
+        const bottom = top - thick;
+        for (let y = bottom; y <= top; y++) {
+          if (y < 1 || y >= CHUNK_Y) continue;
+          if (y === top) data[idx(x, y, z)] = this.idAetherGrass;
+          else if (y > top - 3) data[idx(x, y, z)] = this.idAetherDirt;
+          else data[idx(x, y, z)] = this.idHolystone;
+        }
+
+        // 表层点缀：天堂树（借树判定盐，概率较低）
+        if (data[idx(x, top, z)] === this.idAetherGrass && top + 1 < CHUNK_Y) {
+          const r = hash2i(wx, wz, this.treeSalt ^ 0xae7);
+          if (r < 0.012) {
+            const th = 4 + ((hash2i(wx, wz, this.treeSalt ^ 0xae8) * 3) | 0);
+            const ttop = top + th;
+            const put = (
+              lx: number,
+              y: number,
+              lz: number,
+              id: number,
+              onlyAir: boolean,
+            ): void => {
+              if (
+                lx < 0 ||
+                lx >= CHUNK_X ||
+                lz < 0 ||
+                lz >= CHUNK_Z ||
+                y < 1 ||
+                y >= CHUNK_Y
+              )
+                return;
+              const i = idx(lx, y, lz);
+              if (onlyAir && data[i] !== AIR) return;
+              data[i] = id;
+            };
+            for (let dy = th - 2; dy <= th - 1; dy++)
+              for (let dx = -2; dx <= 2; dx++)
+                for (let dz = -2; dz <= 2; dz++)
+                  put(x + dx, top + dy, z + dz, this.idAetherLeaves, true);
+            for (let dx = -1; dx <= 1; dx++)
+              for (let dz = -1; dz <= 1; dz++)
+                put(x + dx, top + th, z + dz, this.idAetherLeaves, true);
+            put(x, ttop + 1, z, this.idAetherLeaves, true);
+            put(x + 1, ttop + 1, z, this.idAetherLeaves, true);
+            put(x - 1, ttop + 1, z, this.idAetherLeaves, true);
+            put(x, ttop + 1, z + 1, this.idAetherLeaves, true);
+            put(x, ttop + 1, z - 1, this.idAetherLeaves, true);
+            for (let y = top + 1; y <= ttop; y++)
+              put(x, y, z, this.idAetherLog, false);
+          }
+        }
+      }
+    }
     return data;
   }
 }

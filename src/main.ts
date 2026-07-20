@@ -42,6 +42,7 @@ import { StartScreen } from './ui/start-screen';
 import { Sfx } from './audio/sfx';
 import { Particles } from './fx/particles';
 import { MobManager } from './mob/manager';
+import { EnderDragon } from './mob/dragon';
 import { ArrowManager } from './mob/arrows';
 import { TntManager } from './world/tnt';
 import { FluidSimulator } from './world/fluid';
@@ -54,6 +55,7 @@ import { FOODS } from './item/foods';
 import type { HotSlot } from './ui/hotbar';
 import { EnchantUI } from './ui/enchant-ui';
 import { TradingUI } from './ui/trading-ui';
+import { WorldMap } from './ui/world-map';
 import { armorById, armorReduction } from './item/armor';
 import {
   efficiencyMult,
@@ -196,18 +198,27 @@ function startGame(
     hand.resize(window.innerWidth, window.innerHeight);
   });
 
-  // ---- 双维度世界（主世界 + 下界）：各自 World + 生成器 + 区块管理器（独立 Worker 池） ----
+  // ---- 四维度世界（主世界/下界/末地/天堂）：各自 World + 生成器 + 区块管理器（独立 Worker 池） ----
   // 下界用不同派生种子，与主世界地形无关；坐标 1:8（下界 1 格 = 主世界 8 格）
-  const NETHER_SCALE = 8; // 下界 1 格 = 主世界 8 格（传送门坐标换算，#21 用）
-  void NETHER_SCALE;
+  const NETHER_SCALE = 8; // 下界 1 格 = 主世界 8 格（传送门坐标换算）
   const worldGenOver = new WorldGen(seed, registry, 'overworld');
   const worldGenNether = new WorldGen((seed ^ 0x5dee1) | 0, registry, 'nether');
+  const worldGenEnd = new WorldGen((seed ^ 0x3e7d) | 0, registry, 'end');
+  const worldGenAether = new WorldGen((seed ^ 0xae71) | 0, registry, 'aether');
   // 本会话内"玩家修改过的区块"权威副本：与世界共享同一 Uint8Array 引用，
-  // 因此编辑即时反映，保存时编码即为最新状态。主世界用存档键原样；下界加 n: 前缀。
+  // 因此编辑即时反映，保存时编码即为最新状态。主世界用存档键原样；其他维度加前缀。
   const modifiedOver: Map<string, Uint8Array> = save?.chunks ?? new Map();
   const modifiedNether: Map<string, Uint8Array> = new Map();
   if (save?.meta.netherChunks) {
     for (const [k, v] of save.meta.netherChunks) modifiedNether.set(k, v);
+  }
+  const modifiedEnd: Map<string, Uint8Array> = new Map();
+  if (save?.meta.endChunks) {
+    for (const [k, v] of save.meta.endChunks) modifiedEnd.set(k, v);
+  }
+  const modifiedAether: Map<string, Uint8Array> = new Map();
+  if (save?.meta.aetherChunks) {
+    for (const [k, v] of save.meta.aetherChunks) modifiedAether.set(k, v);
   }
   interface DimCtx {
     world: World;
@@ -228,8 +239,21 @@ function startGame(
       modified: modifiedNether,
       cm: null as unknown as ChunkManager,
     },
+    end: {
+      world: new World(registry),
+      gen: worldGenEnd,
+      modified: modifiedEnd,
+      cm: null as unknown as ChunkManager,
+    },
+    aether: {
+      world: new World(registry),
+      gen: worldGenAether,
+      modified: modifiedAether,
+      cm: null as unknown as ChunkManager,
+    },
   };
-  for (const dim of ['overworld', 'nether'] as Dimension[]) {
+  const ALL_DIMS: Dimension[] = ['overworld', 'nether', 'end', 'aether'];
+  for (const dim of ALL_DIMS) {
     const d = dims[dim];
     d.cm = new ChunkManager(
       scene,
@@ -243,7 +267,9 @@ function startGame(
   }
   // 当前维度（读档恢复；缺省主世界）
   let dimension: Dimension =
-    save?.meta.dimension === 'nether' ? 'nether' : 'overworld';
+    save?.meta.dimension && ALL_DIMS.includes(save.meta.dimension)
+      ? save.meta.dimension
+      : 'overworld';
   /** 当前维度上下文（世界/区块管理器/修改集随维度切换） */
   const cur = (): DimCtx => dims[dimension];
   const worldGen = dims.overworld.gen; // 出生点用主世界生成器
@@ -366,11 +392,22 @@ function startGame(
 
   // ---- 玩家（有存档则恢复位置/视角/飞行；坐标属当前维度） ----
   const body = new PlayerBody(cur().world);
-  // 读档落在下界时同步刷怪池与氛围（首次进入不触发传送）
-  if (dimension === 'nether') {
-    mobManager.setWorld(cur().world, true);
-    sky.setNether(true);
-    clouds.setVisible(false);
+  // 末影龙：进入末地时生成，离开/死亡时清理（需在 body/scene 就绪后声明，供下方读档生成）
+  let dragon: EnderDragon | null = null;
+  let dragonDefeated = save?.meta.dragonDefeated ?? false;
+  const idDragonEgg = registry.byName.get('dragon_egg')?.id ?? -1;
+  const idEndCrystalBlock = registry.byName.get('end_crystal')?.id ?? -1;
+  // 读档落在非主世界时同步刷怪池与氛围（首次进入不触发传送）
+  if (dimension !== 'overworld') {
+    mobManager.setWorld(cur().world, dimension === 'nether', null, dimension);
+    sky.setAtmosphere(dimension);
+    clouds.setVisible(dimension === 'aether');
+  } else {
+    mobManager.setWorld(cur().world, false, worldGenOver, 'overworld');
+  }
+  // 读档落在末地且龙未击败：直接生成龙
+  if (dimension === 'end' && !dragonDefeated) {
+    dragon = new EnderDragon(scene);
   }
   if (save) {
     body.x = save.meta.player.x;
@@ -583,6 +620,14 @@ function startGame(
   };
   const furnaceUI = new FurnaceUI(atlas.canvas, hotbar, invMain, invCallbacks);
 
+  // ---- 全屏地图（M 键）：按区块记录已探索区域，随存档持久化 ----
+  const worldMap = new WorldMap(registry, atlas, save?.meta.maps);
+  // 区块落地（生成/读档）即采样进地图；玩家编辑的区块随后由 applyEdit 重采样
+  for (const dim of ALL_DIMS) {
+    const d = dims[dim];
+    d.cm.onChunkExplored = (cx, cz) => worldMap.recordChunk(d.world, cx, cz, dim);
+  }
+
   // ---- 附魔台：右键打开 UI，消耗经验+青金石给装备附魔 ----
   const enchantUI = new EnchantUI(atlas.canvas, hotbar, invMain, {
     ...invCallbacks,
@@ -734,6 +779,25 @@ function startGame(
         survivalInv.open();
       }
     },
+    onMap: () => {
+      if (state !== 'playing') return;
+      if (worldMap.isOpen) {
+        worldMap.close();
+        controls.lock(); // 关地图后回到指针锁定
+      } else {
+        // 开地图：释放鼠标便于拖拽，仅当其它界面都关闭时
+        if (
+          inventory.isOpen ||
+          survivalInv.isOpen ||
+          craftingTable.isOpen ||
+          furnaceUI.isOpen ||
+          tradingUI.isOpen
+        )
+          return;
+        worldMap.show(dimension, body.x, body.z);
+        document.exitPointerLock();
+      }
+    },
   });
   if (save) {
     controls.yaw = save.meta.player.yaw;
@@ -741,7 +805,7 @@ function startGame(
   }
   controls.onWheel = (dir) => hotbar.scroll(dir);
   controls.onLockChange = (locked) => {
-    // 物品栏打开或死亡界面时不弹暂停菜单（都是解锁状态）
+    // 物品栏打开或死亡界面或地图打开时不弹暂停菜单（都是解锁状态）
     hud.setPauseHint(
       state === 'playing' &&
         !locked &&
@@ -750,6 +814,7 @@ function startGame(
         !craftingTable.isOpen &&
         !furnaceUI.isOpen &&
         !tradingUI.isOpen &&
+        !worldMap.isOpen &&
         !dead,
     );
   };
@@ -762,7 +827,7 @@ function startGame(
     Number.isFinite(savedRd) && savedRd >= 4 && savedRd <= 16
       ? savedRd
       : RENDER_DIST;
-  for (const dim of ['overworld', 'nether'] as Dimension[])
+  for (const dim of ALL_DIMS)
     dims[dim].cm.setRenderDist(initRd);
   sky.setRenderDist(initRd);
   rdSlider.value = String(initRd);
@@ -770,7 +835,7 @@ function startGame(
   rdSlider.oninput = () => {
     const v = Number(rdSlider.value);
     rdValue.textContent = String(v);
-    for (const dim of ['overworld', 'nether'] as Dimension[])
+    for (const dim of ALL_DIMS)
       dims[dim].cm.setRenderDist(v);
     sky.setRenderDist(v);
     localStorage.setItem('mc-render-dist', String(v));
@@ -818,19 +883,33 @@ function startGame(
     fluid.setWorld(w);
     gravity.setWorld(w);
     redstone.setWorld(w);
-    mobManager.setWorld(w, target === 'nether');
+    mobManager.setWorld(
+      w,
+      target === 'nether',
+      target === 'overworld' ? worldGenOver : null,
+      target,
+    );
     drops.setWorld(w);
     xpManager.setWorld(w);
     arrowManager.setWorld(w);
     tntManager.setWorld(w);
-    // 氛围：下界暗红近雾 + 无云无天体；主世界恢复正常
-    const isNether = target === 'nether';
-    sky.setNether(isNether);
-    clouds.setVisible(!isNether);
+    // 末影龙：进入末地且未被击败则在场（离开末地销毁，回到主世界不保留）
+    if (target === 'end' && !dragonDefeated && !dragon) {
+      dragon = new EnderDragon(scene);
+    } else if (target !== 'end' && dragon) {
+      dragon.dispose();
+      dragon = null;
+    }
+    // 氛围：各维度独立天空/雾/云。下界/末地洞窟短视距；主世界/天堂正常远雾。
+    sky.setAtmosphere(target);
+    clouds.setVisible(target === 'overworld' || target === 'aether');
     const fog = scene.fog as THREE.Fog;
-    if (isNether) {
+    if (target === 'nether') {
       fog.near = 6;
       fog.far = 64; // 洞窟内短视距
+    } else if (target === 'end') {
+      fog.near = 12;
+      fog.far = 96; // 末地虚空中视距
     } else {
       const nf = sky.normalFog();
       fog.near = nf.near;
@@ -851,6 +930,30 @@ function startGame(
   /** 黑曜石传送门点火：右键门框内侧空气时，把整框内部填为 portal 方块（MC） */
   const idPortalBlock = registry.byName.get('nether_portal')?.id ?? -1;
   const idObsidian = registry.byName.get('obsidian')?.id ?? -1;
+  // 其它维度传送门方块
+  const idEndPortal = registry.byName.get('end_portal')?.id ?? -1;
+  const idAetherPortal = registry.byName.get('aether_portal')?.id ?? -1;
+  const idEndFrameEye = registry.byName.get('end_portal_frame_eye')?.id ?? -1;
+
+  /** 玩家脚下/头所在格命中的传送门方块类型 → 目标维度；无则 null */
+  const portalAt = (): Dimension | null => {
+    const w = cur().world;
+    const fx = Math.floor(body.x);
+    const fz = Math.floor(body.z);
+    for (const yy of [Math.floor(body.y), Math.floor(body.y + 1)]) {
+      const id = w.getBlock(fx, yy, fz);
+      // 末地门：主世界/其它维度 → 末地；末地内 → 回主世界（龙后返回门）
+      if (id === idEndPortal && idEndPortal >= 0)
+        return dimension === 'end' ? 'overworld' : 'end';
+      // 天堂门：主世界 → 天堂；天堂内 → 回主世界
+      if (id === idAetherPortal && idAetherPortal >= 0)
+        return dimension === 'aether' ? 'overworld' : 'aether';
+      // 下界门：主世界 ⇄ 下界
+      if (id === idPortalBlock && idPortalBlock >= 0)
+        return dimension === 'nether' ? 'overworld' : 'nether';
+    }
+    return null;
+  };
 
   /**
    * 在以 (x,y,z) 为内侧空气的竖直黑曜石框内填充传送门方块。
@@ -920,40 +1023,34 @@ function startGame(
     return false;
   };
 
-  /** 玩家是否站在传送门方块内（脚或头所在格） */
-  const inPortal = (): boolean => {
-    if (idPortalBlock < 0) return false;
-    const w = cur().world;
-    const fx = Math.floor(body.x);
-    const fz = Math.floor(body.z);
-    return (
-      w.getBlock(fx, Math.floor(body.y), fz) === idPortalBlock ||
-      w.getBlock(fx, Math.floor(body.y + 1), fz) === idPortalBlock
-    );
-  };
-
   /**
-   * 触发跨维度传送：按 1:8 换算水平坐标，目标维度就近找可站立处，
+   * 触发跨维度传送：target 由 portalAt 判定。
+   * 下界按 1:8 换算水平坐标；末地/天堂按 1:1；目标维度就近找可站立处，
    * 若目标点附近无传送门则在落脚处自动建一座（MC 行为）。
    */
-  const travelThroughPortal = (): void => {
-    const target: Dimension =
-      dimension === 'overworld' ? 'nether' : 'overworld';
-    // 主世界→下界 ÷8；下界→主世界 ×8
-    const nx =
-      target === 'nether' ? body.x / NETHER_SCALE : body.x * NETHER_SCALE;
-    const nz =
-      target === 'nether' ? body.z / NETHER_SCALE : body.z * NETHER_SCALE;
+  const travelThroughPortal = (target: Dimension): void => {
+    // 主世界→下界 ÷8；下界→主世界 ×8；其余维度 1:1
+    let nx = body.x;
+    let nz = body.z;
+    if (target === 'nether') {
+      nx = body.x / NETHER_SCALE;
+      nz = body.z / NETHER_SCALE;
+    } else if (dimension === 'nether' && target === 'overworld') {
+      nx = body.x * NETHER_SCALE;
+      nz = body.z * NETHER_SCALE;
+    }
     const tw = dims[target].world;
-    // 目标世界就近找安全落点：从合理高度向下找首个可站立（下界封顶 128）
     const tx = Math.floor(nx);
     const tz = Math.floor(nz);
-    let ty = target === 'nether' ? 70 : 90;
+    // 各维度起始搜索高度
+    const startY =
+      target === 'nether' ? 70 : target === 'end' ? 80 : target === 'aether' ? 100 : 90;
     // 先确保目标区块已生成（同步查 findSpawnY 前需有方块）
     dims[target].cm.update(nx, nz, 24, false);
     // 向下找第一个"脚+头为空气/可站立"且下方实心处
     let found = -1;
-    for (let y = Math.min(ty, 118); y > (target === 'nether' ? 12 : 2); y--) {
+    const minY = target === 'nether' ? 12 : target === 'end' ? 40 : 2;
+    for (let y = Math.min(startY, 118); y > minY; y--) {
       const below = tw.getBlock(tx, y - 1, tz);
       const feet = tw.getBlock(tx, y, tz);
       const head = tw.getBlock(tx, y + 1, tz);
@@ -965,24 +1062,49 @@ function startGame(
         break;
       }
     }
-    if (found < 0) found = target === 'nether' ? 70 : tw.findSpawnY(tx, tz);
+    if (found < 0) {
+      // 兜底：末地/天堂落在主岛/浮岛基准高度，主世界用地表，下界用 70
+      found =
+        target === 'nether'
+          ? 70
+          : target === 'end'
+            ? 66
+            : target === 'aether'
+              ? 78
+              : tw.findSpawnY(tx, tz);
+    }
     // 切换维度并落脚
     switchDimension(target, tx + 0.5, found, tz + 0.5);
     // 若目标点附近无传送门方块，建一座迷你门 + 底座，便于回程（MC 生成对侧门）
-    ensureReturnPortal(tx, found, tz);
+    ensureReturnPortal(tx, found, tz, target);
   };
 
-  /** 在目标维度 (x,y,z) 附近建一座 4×5 黑曜石门并点亮内部（若附近无现成门） */
-  const ensureReturnPortal = (x: number, y: number, z: number): void => {
-    if (idPortalBlock < 0 || idObsidian < 0) return;
+  /** 在目标维度 (x,y,z) 附近建一座返程传送门并点亮内部（若附近无现成门） */
+  const ensureReturnPortal = (
+    x: number,
+    y: number,
+    z: number,
+    target: Dimension,
+  ): void => {
+    // 返程门方块与框材：末地→末地门+末地石框；天堂→天堂门+荧石框；其余→黑曜石下界门
+    let frameId = idObsidian;
+    let portalId = idPortalBlock;
+    if (target === 'end') {
+      frameId = registry.byName.get('end_stone')?.id ?? idObsidian;
+      portalId = idEndPortal;
+    } else if (target === 'aether') {
+      frameId = registry.byName.get('glowstone')?.id ?? idObsidian;
+      portalId = idAetherPortal;
+    }
+    if (portalId < 0 || frameId < 0) return;
     const w = cur().world;
     // 附近 8 格已有 portal 则不建
     for (let dy = -4; dy <= 4; dy++)
       for (let dx = -8; dx <= 8; dx++)
         for (let dz = -8; dz <= 8; dz++)
-          if (w.getBlock(x + dx, y + dy, z + dz) === idPortalBlock) return;
+          if (w.getBlock(x + dx, y + dy, z + dz) === portalId) return;
     // 建门：沿 X 轴 4 宽 5 高（底 y，内空 2×3）
-    const bx = x - 1; // 门左下角
+    const bx = x - 1;
     const by = y;
     const bz = z;
     for (let ix = 0; ix < 4; ix++) {
@@ -990,11 +1112,37 @@ function startGame(
         const isFrame = ix === 0 || ix === 3 || iy === 0 || iy === 4;
         const px = bx + ix;
         const py = by + iy;
-        if (isFrame) applyEdit(px, py, bz, idObsidian);
-        else applyEdit(px, py, bz, idPortalBlock);
+        if (isFrame) applyEdit(px, py, bz, frameId);
+        else applyEdit(px, py, bz, portalId);
       }
     }
-    // 门底铺一层黑曜石底座防坠落（底座即门框底行）
+  };
+
+  /**
+   * 末影龙死亡后在陨落地建一座"返回主世界"的基岩台 + 末地门。
+   * 台中央放返回传送门（玩家站入即回主世界重生点附近）。
+   */
+  const buildExitPortal = (x: number, y: number, z: number): void => {
+    const idBedrock = registry.byName.get('bedrock')?.id ?? -1;
+    if (idEndPortal < 0 || idBedrock < 0) return;
+    // 基岩平台 5×5
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        applyEdit(x + dx, y, z + dz, idBedrock);
+      }
+    }
+    // 中央 1 格返回门（上方留空供站立）
+    applyEdit(x, y + 1, z, idEndPortal);
+    // 四角基岩柱（MC 返回门火炬柱简化）
+    for (const [ox, oz] of [
+      [-2, -2],
+      [2, -2],
+      [-2, 2],
+      [2, 2],
+    ] as const) {
+      applyEdit(x + ox, y + 1, z + oz, idBedrock);
+      applyEdit(x + ox, y + 2, z + oz, idBedrock);
+    }
   };
 
   // ---- 生存：受伤 / 死亡 / 重生 ----
@@ -1090,10 +1238,10 @@ function startGame(
   const savedAo = localStorage.getItem('mc-smooth-lighting');
   const initAo = savedAo === null ? true : savedAo === '1';
   aoCheck.checked = initAo;
-  for (const dim of ['overworld', 'nether'] as Dimension[])
+  for (const dim of ALL_DIMS)
     dims[dim].cm.setSmoothLighting(initAo);
   aoCheck.onchange = () => {
-    for (const dim of ['overworld', 'nether'] as Dimension[])
+    for (const dim of ALL_DIMS)
       dims[dim].cm.setSmoothLighting(aoCheck.checked);
     localStorage.setItem('mc-smooth-lighting', aoCheck.checked ? '1' : '0');
   };
@@ -1162,6 +1310,10 @@ function startGame(
           spawnPoint: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
           dimension,
           netherChunks: modifiedNether.size > 0 ? modifiedNether : undefined,
+          endChunks: modifiedEnd.size > 0 ? modifiedEnd : undefined,
+          aetherChunks: modifiedAether.size > 0 ? modifiedAether : undefined,
+          maps: worldMap.serialize(),
+          dragonDefeated,
         },
         modifiedOver,
       )
@@ -1207,6 +1359,8 @@ function startGame(
       cm.markEditedArea(edit.cx, edit.cz);
     const data = w.chunks.get(chunkKey(edit.cx, edit.cz));
     if (data) cur().modified.set(chunkKey(edit.cx, edit.cz), data);
+    // 地图：编辑所在区块重采样（顶面颜色可能改变）
+    worldMap.recordChunk(w, edit.cx, edit.cz, dimension);
     // 唤醒流体（水位重算/扩散/消退）与重力方块（上方悬空则开始下落）
     fluid.wake(wx, y, wz);
     gravity.tryStart(wx, y + 1, wz);
@@ -1413,6 +1567,12 @@ function startGame(
     const id = cur().world.getBlock(x, y, z);
     const def = registry.def(id);
     if (!def || def.hardness < 0) return;
+    // 末影水晶：一击破坏并爆炸（伤周围，停止龙回血）
+    if (def.name === 'end_crystal') {
+      applyEdit(x, y, z, AIR);
+      explode(x + 0.5, y + 0.5, z + 0.5, 2, 0);
+      return;
+    }
     applyEdit(x, y, z, AIR);
     // 生存模式：方块实体掉落 + 矿石经验（创造无掉落，MC 一致）
     // 石质矿物需镐达到层级才可采集，否则破坏无掉落（MC 规则）
@@ -1604,6 +1764,19 @@ function startGame(
         damageHeldTool(heldTool?.kind === 'sword' ? 2 : 1);
       }
     }
+    // 近战攻击末影龙：准星命中龙（大型宽松判定）
+    if (attackHeld && dragon && !dragon.dying) {
+      const reach = 5;
+      if (dragon.hitTest(eye.x + tmpDir.x * 3, eye.y + tmpDir.y * 3, eye.z + tmpDir.z * 3, reach)) {
+        const heldTool = hotbar.current.tool?.def ?? null;
+        const sharpLvl = hotbar.current.tool?.ench?.sharpness ?? 0;
+        const melee = (heldTool?.melee ?? 1) + sharpnessBonus(sharpLvl);
+        if (dragon.damage(melee)) {
+          sfx.playHurt();
+          damageHeldTool(heldTool?.kind === 'sword' ? 2 : 1);
+        }
+      }
+    }
 
     // 破坏
     let cracking = false;
@@ -1669,6 +1842,22 @@ function startGame(
         useCooldown = 0.3;
       } else if (hitDef && hitDef.name === 'bed') {
         trySleep(currentHit!.x, currentHit!.y, currentHit!.z);
+        useCooldown = 0.3;
+      } else if (hitDef && hitDef.name === 'end_portal_frame') {
+        // 末地传送门框架：手持末影珍珠右键 → 嵌眼激活（MC 用末影之眼）
+        if (curTool?.id === 'ender_pearl') {
+          applyEdit(
+            currentHit!.x,
+            currentHit!.y,
+            currentHit!.z,
+            idEndFrameEye,
+          );
+          if (gameMode === 'survival') consumeHeldMaterial('ender_pearl');
+          sfx.playPlace();
+          hud.showItemName('传送门框架已激活');
+        } else {
+          hud.showItemName('需要末影珍珠来激活');
+        }
         useCooldown = 0.3;
       } else if (
         hitDef &&
@@ -1905,12 +2094,13 @@ function startGame(
 
       updateInteraction(dt);
       hand.update(dt, Math.hypot(body.vx, body.vz), body.onGround, attackHeld);
-      // 传送门：站立于 portal 方块内累计 1.2s（MC 约 4s，此处加速体验）触发跨维度
-      if (inPortal()) {
+      // 传送门：站立于 portal 方块内累计 1.2s 触发跨维度（目标维度由 portalAt 判定）
+      const portalTarget = portalAt();
+      if (portalTarget !== null) {
         portalTimer += dt;
         if (portalTimer >= 1.2) {
           portalTimer = 0;
-          travelThroughPortal();
+          travelThroughPortal(portalTarget);
         }
       } else {
         portalTimer = 0;
@@ -1971,8 +2161,48 @@ function startGame(
         () => sfx.playFuse(),
       );
 
+      // 末影龙：飞行 AI + 俯冲攻击 + 水晶回血 + 死亡结算（仅末地）
+      if (dragon) {
+        // 统计存活末影水晶（末地主岛柱顶，供龙回血）
+        let crystals = 0;
+        if (idEndCrystalBlock >= 0) {
+          for (let i = 0; i < 8; i++) {
+            const ang = (i / 8) * Math.PI * 2;
+            const cx = Math.round(Math.cos(ang) * 30);
+            const cz = Math.round(Math.sin(ang) * 30);
+            for (let y = 84; y < 100; y++) {
+              if (cur().world.getBlock(cx, y, cz) === idEndCrystalBlock) {
+                crystals++;
+                break;
+              }
+            }
+          }
+        }
+        dragon.crystalsAlive = crystals;
+        dragon.step(dt, body.x, body.y, body.z, (dmg, kbx, kbz) => {
+          hurtPlayer(dmg, kbx, kbz);
+        });
+        if (dragon.removeMe) {
+          // 龙死亡结算：爆经验 + 掉龙蛋 + 激活返回传送门 + 标记已击败
+          const ex = Math.floor(dragon.x);
+          const ez = Math.floor(dragon.z);
+          xpManager.spawn(500, dragon.x, dragon.y, dragon.z); // 大量经验
+          if (idDragonEgg >= 0) {
+            applyEdit(ex, Math.floor(dragon.y), ez, idDragonEgg);
+          }
+          // 返回传送门：在龙陨落地放一座末地门框 + 门（回主世界）
+          buildExitPortal(ex, Math.floor(dragon.y), ez);
+          dragon.dispose();
+          dragon = null;
+          dragonDefeated = true;
+          hud.showItemName('末影龙被击败了！');
+          sfx.playExplosion();
+          saveNow();
+        }
+      }
+
       // 箭矢：抛物线飞行；敌对箭命中玩家扣血（创造/无敌帧由 hurtPlayer 判定），
-      // 玩家箭命中生物按蓄力伤害 + 击退
+      // 玩家箭命中生物按蓄力伤害 + 击退；命中末影龙按龙判定
       arrowManager.update(
         dt,
         body.x,
@@ -1980,7 +2210,13 @@ function startGame(
         body.z,
         (dmg) => hurtPlayer(dmg),
         undefined,
-        (x, y, z, dmg, vx, vz) => mobManager.arrowHit(x, y, z, dmg, vx, vz),
+        (x, y, z, dmg, vx, vz) => {
+          if (dragon && dragon.hitTest(x, y, z, 1)) {
+            if (dragon.damage(dmg)) sfx.playHurt();
+            return true;
+          }
+          return mobManager.arrowHit(x, y, z, dmg, vx, vz);
+        },
       );
 
       // 点燃的 TNT：引信/下落/白闪，尽则经回调大爆炸（power=4）
@@ -2147,6 +2383,8 @@ function startGame(
 
     particles.update(dt);
     hud.update(dt);
+    // 地图：打开时按玩家位置/朝向重绘（世界模拟已冻结，仅读已探索数据）
+    worldMap.update(body.x, body.z, controls.yaw, dimension);
     debugPanel.update(dt, () =>
       [
         `XYZ: ${body.x.toFixed(2)} / ${body.y.toFixed(2)} / ${body.z.toFixed(2)}`,

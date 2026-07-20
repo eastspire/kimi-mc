@@ -566,6 +566,19 @@
     "netherrack": { "id": 71, "display": "下界岩", "model": "block/cube_all", "textures": { "all": "netherrack" }, "solid": true, "renderLayer": "solid", "hardness": 0.4 },
     "soul_sand": { "id": 72, "display": "灵魂沙", "model": "block/cube_all", "textures": { "all": "soul_sand" }, "solid": true, "renderLayer": "solid", "hardness": 0.5 },
     "lava": { "id": 73, "display": "岩浆", "model": "block/cube_all", "textures": { "all": "lava_still" }, "solid": false, "selectable": false, "renderLayer": "translucent", "hardness": -1, "luminance": 15, "cullSame": true },
-    "nether_portal": { "id": 74, "display": "下界传送门", "model": "block/nether_portal", "textures": { "portal": "nether_portal" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": -1, "luminance": 11, "replaceable": false }
+    "nether_portal": { "id": 74, "display": "下界传送门", "model": "block/nether_portal", "textures": { "portal": "nether_portal" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": -1, "luminance": 11, "replaceable": false },
+    "end_stone": { "id": 75, "display": "末地石", "model": "block/cube_all", "textures": { "all": "end_stone" }, "solid": true, "renderLayer": "solid", "hardness": 3.0 },
+    "end_stone_bricks": { "id": 76, "display": "末地石砖", "model": "block/cube_all", "textures": { "all": "end_stone_bricks" }, "solid": true, "renderLayer": "solid", "hardness": 3.0 },
+    "end_portal": { "id": 77, "display": "末地传送门", "model": "block/end_portal", "textures": { "portal": "end_portal" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": -1, "luminance": 13, "replaceable": false },
+    "end_portal_frame": { "id": 78, "display": "末地传送门框架", "model": "block/cube_top", "textures": { "top": "end_portal_frame", "side": "end_stone_bricks", "bottom": "end_stone" }, "solid": true, "renderLayer": "solid", "hardness": -1 },
+    "end_portal_frame_eye": { "id": 79, "display": "末地传送门框架", "model": "block/cube_top", "textures": { "top": "end_portal_frame_eye", "side": "end_stone_bricks", "bottom": "end_stone" }, "solid": true, "renderLayer": "solid", "hardness": -1 },
+    "end_crystal": { "id": 80, "display": "末影水晶", "model": "block/cross", "textures": { "cross": "end_crystal" }, "solid": false, "renderLayer": "cutout", "hardness": 0, "luminance": 10, "replaceable": true },
+    "dragon_egg": { "id": 81, "display": "龙蛋", "model": "block/cube_all", "textures": { "all": "dragon_egg" }, "solid": true, "renderLayer": "solid", "hardness": 3.0, "luminance": 1 },
+    "aether_grass": { "id": 82, "display": "天堂草方块", "model": "block/cube_top", "textures": { "top": "aether_grass_top", "side": "aether_grass_side", "bottom": "aether_dirt" }, "solid": true, "renderLayer": "solid", "hardness": 0.6 },
+    "aether_dirt": { "id": 83, "display": "天堂泥土", "model": "block/cube_all", "textures": { "all": "aether_dirt" }, "solid": true, "renderLayer": "solid", "hardness": 0.5 },
+    "holystone": { "id": 84, "display": "圣石", "model": "block/cube_all", "textures": { "all": "holystone" }, "solid": true, "renderLayer": "solid", "hardness": 1.5 },
+    "aether_portal": { "id": 85, "display": "天堂传送门", "model": "block/aether_portal", "textures": { "portal": "aether_portal" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": -1, "luminance": 12, "replaceable": false },
+    "aether_leaves": { "id": 86, "display": "天堂树叶", "model": "block/cube_all", "textures": { "all": "aether_leaves" }, "solid": true, "renderLayer": "solid", "hardness": 0.2, "cullSame": true },
+    "aether_log": { "id": 87, "display": "天堂原木", "model": "block/cube_column", "textures": { "end": "log_top", "side": "aether_log" }, "solid": true, "renderLayer": "solid", "hardness": 2.0 }
   }
 }

@@ -28,7 +28,7 @@ npm.cmd run preview  # 预览构建产物
 | F3                   | 调试信息                         |
 | ESC                  | 释放鼠标（暂停提示）             |
 
-## 技术要点
+## 要点
 
 - 单图集 `NearestFilter`、无 mipmap，自定义 shader 按格内 `fract` UV 采样，支持贪心合并后的重复贴图且不串格
 - 每区块贪心网格化（隐藏面剔除 + 同贴图/AO 矩形合并），Web Worker 池并行，Transferable 零拷贝回传

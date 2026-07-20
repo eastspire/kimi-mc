@@ -1,10 +1,12 @@
 // ============================================================
 // 开始 / 加载 / 错误 全屏界面
-// 流程：选择（种子输入 + 创建/继续）→ 生成进度 → 点击进入
+// 流程：选择（种子输入 + 模式选择 + 创建/继续）→ 生成进度 → 点击进入
 // ============================================================
 
+import type { GameMode } from '../core/persistence';
+
 export interface ChoiceCallbacks {
-  onCreate: (seedText: string) => void;
+  onCreate: (seedText: string, mode: GameMode) => void;
   onContinue: () => void;
 }
 
@@ -17,17 +19,28 @@ export class StartScreen {
   private continueBtn = document.getElementById('continue-btn') as HTMLButtonElement;
   private seedRow = document.getElementById('seed-row')!;
   private seedInput = document.getElementById('seed-input') as HTMLInputElement;
+  private modeRow = document.getElementById('mode-row')!;
+  private mode: GameMode = 'creative';
 
-  /** 主菜单：种子输入 + 创建新世界（有存档时额外显示继续按钮） */
+  /** 主菜单：种子输入 + 模式选择 + 创建新世界（有存档时额外显示继续按钮） */
   showChoice(hasSave: boolean, cb: ChoiceCallbacks): void {
     this.overlay.classList.remove('hidden');
     this.seedRow.classList.remove('hidden');
+    this.modeRow.classList.remove('hidden');
     this.progressWrap.classList.add('hidden');
     this.continueBtn.classList.toggle('hidden', !hasSave);
     this.btn.disabled = false;
     this.btn.textContent = '创建新世界';
-    this.btn.onclick = () => cb.onCreate(this.seedInput.value);
+    this.btn.onclick = () => cb.onCreate(this.seedInput.value, this.mode);
     this.continueBtn.onclick = () => cb.onContinue();
+    for (const b of this.modeRow.querySelectorAll<HTMLButtonElement>('button')) {
+      b.classList.toggle('mode-on', b.dataset.mode === this.mode);
+      b.onclick = () => {
+        this.mode = b.dataset.mode === 'survival' ? 'survival' : 'creative';
+        for (const x of this.modeRow.querySelectorAll('button'))
+          x.classList.toggle('mode-on', x === b);
+      };
+    }
     this.seedInput.focus();
   }
 
@@ -38,6 +51,7 @@ export class StartScreen {
 
   showGenerating(): void {
     this.seedRow.classList.add('hidden');
+    this.modeRow.classList.add('hidden');
     this.continueBtn.classList.add('hidden');
     this.progressWrap.classList.remove('hidden');
     this.btn.disabled = true;
@@ -61,6 +75,7 @@ export class StartScreen {
     this.overlay.classList.add('error');
     this.overlay.classList.remove('hidden');
     this.seedRow.classList.add('hidden');
+    this.modeRow.classList.add('hidden');
     this.continueBtn.classList.add('hidden');
     this.progressWrap.classList.remove('hidden');
     this.progressText.textContent = `加载失败：${message}`;

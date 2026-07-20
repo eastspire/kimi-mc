@@ -242,6 +242,49 @@
       "hardness": 0.3,
       "luminance": 15
     },
+    "crafting_table": {
+      "id": 28,
+      "display": "工作台",
+      "model": "block/cube_column",
+      "textures": { "end": "crafting_top", "side": "crafting_side" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 2.5
+    },
+    "furnace": {
+      "id": 29,
+      "display": "熔炉",
+      "model": "block/cube",
+      "textures": {
+        "up": "furnace_top",
+        "down": "furnace_top",
+        "north": "furnace_front",
+        "south": "furnace_side",
+        "west": "furnace_side",
+        "east": "furnace_side"
+      },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 3.5
+    },
+    "bed": {
+      "id": 30,
+      "display": "床",
+      "model": "block/bed",
+      "textures": { "top": "bed_top", "side": "bed_side" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 0.2
+    },
+    "white_wool": {
+      "id": 31,
+      "display": "白色羊毛",
+      "model": "block/cube_all",
+      "textures": { "all": "wool" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 0.8
+    },
     "obsidian": {
       "id": 25,
       "display": "黑曜石",

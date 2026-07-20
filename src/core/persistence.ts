@@ -16,7 +16,21 @@ export interface PlayerSave {
   x: number; y: number; z: number;
   yaw: number; pitch: number;
   flying: boolean;
+  /** 生存模式生命体征；旧存档缺省 → 满值 */
+  hp?: number;
+  hunger?: number;
+  /** 经验（当前级内进度）与等级；旧存档缺省 → 0 */
+  xp?: number;
+  level?: number;
 }
+
+export type GameMode = 'creative' | 'survival';
+
+/** 快捷栏存档槽位：{ b: 方块id } / { f: 食物id } / { t: 工具id, d?: 耐久 }，n 为数量 */
+export type SavedHotSlot =
+  | { b: number; n: number }
+  | { f: string; n: number }
+  | { t: string; n: number; d?: number };
 
 export interface SaveMeta {
   version: number;
@@ -26,6 +40,24 @@ export interface SaveMeta {
   savedAt: number;
   /** 昼夜累计秒数（含天数）；旧存档缺省 → 默认上午 */
   dayTime?: number;
+  /** 游戏模式；旧存档缺省 → creative */
+  mode?: GameMode;
+  /** 生存模式快捷栏内容；创造模式不保存 */
+  hotbar?: (SavedHotSlot | null)[];
+  /** 生存模式背包主栏 27 格 */
+  inv?: (SavedHotSlot | null)[];
+  /** 世界中的熔炉状态（位置+内容+燃烧/烧炼进度） */
+  furnaces?: {
+    p: [number, number, number];
+    i: SavedHotSlot | null;
+    f: SavedHotSlot | null;
+    o: SavedHotSlot | null;
+    burn: number;
+    burnMax: number;
+    cook: number;
+  }[];
+  /** 床设置的重生点；缺省 → 世界出生点 */
+  spawnPoint?: { x: number; y: number; z: number };
 }
 
 export interface LoadedSave {

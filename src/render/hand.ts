@@ -40,18 +40,46 @@ export class Hand {
     this.scene.add(this.group);
   }
 
+  /** 清空手持网格（方块几何/食物材质各归其主释放） */
+  private clearMesh(): void {
+    if (!this.mesh) return;
+    this.group.remove(this.mesh);
+    this.mesh.geometry.dispose();
+    if (this.mesh.material !== this.material) {
+      (this.mesh.material as THREE.Material).dispose();
+    }
+    this.mesh = null;
+  }
+
   /** 切换手持方块：重建网格并触发 equip 动画 */
   setBlock(def: BlockDef): void {
-    if (this.mesh) {
-      this.group.remove(this.mesh);
-      this.mesh.geometry.dispose();
-      this.mesh = null;
-    }
+    this.clearMesh();
     const arr = buildBlockGeometry(def);
     if (arr) {
       this.mesh = new THREE.Mesh(toGeometry(arr), this.material);
       this.group.add(this.mesh);
     }
+    this.equipT = 0;
+  }
+
+  /** 手持食物：平面斜持（MC 物品姿态） */
+  setFood(tex: THREE.Texture): void {
+    this.clearMesh();
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      alphaTest: 0.5,
+      side: THREE.DoubleSide,
+    });
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.62), mat);
+    this.mesh.rotation.y = Math.PI / 4;
+    this.group.add(this.mesh);
+    this.equipT = 0;
+  }
+
+  /** 空手 */
+  setEmpty(): void {
+    this.clearMesh();
     this.equipT = 0;
   }
 

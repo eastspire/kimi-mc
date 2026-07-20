@@ -1,0 +1,17 @@
+{
+  "comment": "床：单格矮块（9/16 高），简化自 MC 双格床",
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 9, 16],
+      "faces": {
+        "down": { "texture": "#side", "cullface": "down" },
+        "up": { "texture": "#top" },
+        "north": { "texture": "#side" },
+        "south": { "texture": "#side" },
+        "west": { "texture": "#side" },
+        "east": { "texture": "#side" }
+      }
+    }
+  ]
+}

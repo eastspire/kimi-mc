@@ -12,6 +12,10 @@
     <div id="hud">
       <div id="crosshair"></div>
       <div id="item-name"></div>
+      <div id="xp-bar" class="hidden"><div id="xp-fill"></div></div>
+      <div id="xp-level" class="hidden"></div>
+      <div id="hearts" class="hidden"></div>
+      <div id="hunger" class="hidden"></div>
       <div id="hotbar"></div>
       <div id="debug"></div>
       <div id="pause-menu" class="hidden">
@@ -63,6 +67,10 @@
             spellcheck="false"
           />
         </div>
+        <div id="mode-row">
+          <button data-mode="creative" class="mode-on">创造模式</button>
+          <button data-mode="survival">生存模式</button>
+        </div>
         <div id="overlay-progress-wrap" class="hidden">
           <div id="overlay-progress-text">正在生成世界…</div>
           <div id="overlay-bar-outer"><div id="overlay-bar"></div></div>
@@ -71,6 +79,77 @@
           <button id="continue-btn" class="hidden">继续上次的世界</button>
           <button id="overlay-btn">创建新世界</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 受伤红闪 + 死亡界面 -->
+    <div id="hurt-overlay"></div>
+    <div id="sleep-overlay"></div>
+    <div id="death-screen" class="hidden">
+      <div id="death-box">
+        <h1>你死了！</h1>
+        <button id="respawn-btn">重生</button>
+      </div>
+    </div>
+
+    <!-- 生存模式背包 + 2×2 合成 -->
+    <div id="inv2" class="hidden">
+      <div id="inv2-box">
+        <h2>物品栏</h2>
+        <div id="inv2-top">
+          <div id="inv2-craft"></div>
+          <div id="inv2-arrow">→</div>
+          <div id="inv2-result"></div>
+        </div>
+        <div id="inv2-main"></div>
+        <div id="inv2-hotbar"></div>
+        <div id="inv2-tip">左键整堆 · 右键取半/放一个 · E / ESC 关闭</div>
+      </div>
+      <div id="inv2-cursor">
+        <canvas width="44" height="44"></canvas>
+        <span class="count"></span>
+      </div>
+    </div>
+
+    <!-- 合成台 3×3 合成界面 -->
+    <div id="inv3" class="hidden">
+      <div id="inv3-box">
+        <h2>合成</h2>
+        <div id="inv3-top">
+          <div id="inv3-craft"></div>
+          <div id="inv3-arrow">→</div>
+          <div id="inv3-result"></div>
+        </div>
+        <div id="inv3-main"></div>
+        <div id="inv3-hotbar"></div>
+        <div id="inv3-tip">左键整堆 · 右键取半/放一个 · E / ESC 关闭</div>
+      </div>
+      <div id="inv3-cursor">
+        <canvas width="44" height="44"></canvas>
+        <span class="count"></span>
+      </div>
+    </div>
+
+    <!-- 熔炉界面 -->
+    <div id="inv4" class="hidden">
+      <div id="inv4-box">
+        <h2>熔炉</h2>
+        <div id="inv4-top">
+          <div id="inv4-left">
+            <div id="inv4-input"></div>
+            <div id="inv4-fire"><div class="fill"></div></div>
+            <div id="inv4-fuel"></div>
+          </div>
+          <div id="inv4-arrow"><div class="fill"></div></div>
+          <div id="inv4-output"></div>
+        </div>
+        <div id="inv4-main"></div>
+        <div id="inv4-hotbar"></div>
+        <div id="inv4-tip">上放原料 · 下放燃料 · 关闭后熔炉继续工作</div>
+      </div>
+      <div id="inv4-cursor">
+        <canvas width="44" height="44"></canvas>
+        <span class="count"></span>
       </div>
     </div>
 

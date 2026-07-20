@@ -3,7 +3,7 @@ import './style.css';
 import { createAtlas, TILE_INDEX, type AtlasResult } from './core/atlas';
 import { loadBlocks, type BlockDef } from './core/model-loader';
 import { BlockRegistry, AIR } from './core/block-registry';
-import { Persistence, type LoadedSave } from './core/persistence';
+import { Persistence, type LoadedSave, type GameMode } from './core/persistence';
 import { WorldGen, SEA_LEVEL, parseSeedInput } from './world/worldgen';
 import { World, chunkKey } from './world/world';
 import { ChunkManager, RENDER_DIST } from './render/chunk-manager';
@@ -16,10 +16,29 @@ import { raycastVoxel, type RayHit } from './player/raycast';
 import { Hud } from './ui/hud';
 import { Hotbar } from './ui/hotbar';
 import { Inventory } from './ui/inventory';
+import { SurvivalInventory, emptyHotSlot } from './ui/survival-inventory';
+import { CraftingTable } from './ui/crafting-table';
+import {
+  FurnaceUI,
+  newFurnace,
+  serializeFurnace,
+  tickFurnace,
+  type FurnaceState,
+} from './ui/furnace-ui';
+import { resolveSlot } from './ui/hotbar';
+import type { SmeltOut } from './item/smelting';
+import { TOOLS, miningSpeed, canHarvest } from './item/tools';
 import { DebugPanel } from './ui/debug';
 import { StartScreen } from './ui/start-screen';
 import { Sfx } from './audio/sfx';
 import { Particles } from './fx/particles';
+import { MobManager } from './mob/manager';
+import { ArrowManager } from './mob/arrows';
+import type { MobKind } from './mob/mob';
+import { DropManager } from './item/drops';
+import { XpManager } from './item/xp';
+import { FOODS } from './item/foods';
+import type { HotSlot } from './ui/hotbar';
 
 // ============================================================
 // 主入口：加载模型 → 主菜单（种子/存档）→ 生成世界 → 游戏主循环
@@ -68,10 +87,10 @@ function showMenu(
   let createArmed = false;
   let createArmTimer = 0;
   startScreen.showChoice(save !== null, {
-    onCreate: (seedText) => {
+    onCreate: (seedText, mode) => {
       const begin = (): void => {
         const { seed, label } = parseSeedInput(seedText);
-        startGame(atlas, registry, defs, persistence, null, seed, label);
+        startGame(atlas, registry, defs, persistence, null, seed, label, mode);
       };
       if (save && !createArmed) {
         // 两段确认：3 秒内再次点击才删除旧存档（不用原生 confirm，避免模态阻断）
@@ -106,6 +125,7 @@ function showMenu(
         save,
         save.meta.seed,
         save.meta.seedText,
+        save.meta.mode ?? 'creative',
       );
     },
   });
@@ -119,6 +139,7 @@ function startGame(
   save: LoadedSave | null,
   seed: number,
   seedLabel: string,
+  mode: GameMode,
 ): void {
   startScreen.showGenerating();
 
@@ -175,6 +196,73 @@ function startGame(
   // 常规雾距由 sky.normalFog() 按当前渲染距离给出（水下切换后用于恢复）
   const underwaterColor = new THREE.Color();
   const particles = new Particles(scene);
+  const drops = new DropManager(scene, world, chunkManager.opaqueMat);
+  const xpManager = new XpManager(scene, world);
+  const arrowManager = new ArrowManager(scene, world);
+  // 生物掉落（MC 一致）：猪 1-3 生猪排；僵尸 0-2 腐肉+5 经验；羊 1 羊毛+1-2 生羊肉；
+  // 牛 1-3 生牛肉+0-2 皮革；鸡 0-2 羽毛+1 生鸡肉；骷髅 0-2 骨头+0-2 箭；
+  // 苦力怕 0-2 火药；被动生物 1-3 经验，敌对生物 5 经验
+  const mobManager = new MobManager(
+    scene,
+    world,
+    particles,
+    (kind, x, y, z) => {
+      const xp = (): number => 1 + Math.floor(Math.random() * 3);
+      if (kind === 'sheep') {
+        const wool = registry.byName.get('white_wool');
+        if (wool) drops.spawnBlock(wool, x, y, z);
+        const nm = 1 + Math.floor(Math.random() * 2);
+        for (let i = 0; i < nm; i++) drops.spawnFood(FOODS.mutton, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(xp(), x, y, z);
+        return;
+      }
+      if (kind === 'cow') {
+        const nb = 1 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < nb; i++) drops.spawnFood(FOODS.beef, x, y, z);
+        const nl = Math.floor(Math.random() * 3);
+        for (let i = 0; i < nl; i++) drops.spawnTool(TOOLS.leather, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(xp(), x, y, z);
+        return;
+      }
+      if (kind === 'chicken') {
+        const nf = Math.floor(Math.random() * 3);
+        for (let i = 0; i < nf; i++) drops.spawnTool(TOOLS.feather, x, y, z);
+        drops.spawnFood(FOODS.chicken, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(xp(), x, y, z);
+        return;
+      }
+      if (kind === 'skeleton') {
+        const nb = Math.floor(Math.random() * 3);
+        for (let i = 0; i < nb; i++) drops.spawnTool(TOOLS.bone, x, y, z);
+        const na = Math.floor(Math.random() * 3);
+        for (let i = 0; i < na; i++) drops.spawnTool(TOOLS.arrow, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
+        return;
+      }
+      if (kind === 'creeper') {
+        const ng = Math.floor(Math.random() * 3);
+        for (let i = 0; i < ng; i++) drops.spawnTool(TOOLS.gunpowder, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
+        return;
+      }
+      const n =
+        kind === 'pig'
+          ? 1 + Math.floor(Math.random() * 3)
+          : Math.floor(Math.random() * 3);
+      const food = kind === 'pig' ? FOODS.porkchop : FOODS.rotten_flesh;
+      for (let i = 0; i < n; i++) drops.spawnFood(food, x, y, z);
+      if (gameMode === 'survival')
+        xpManager.spawn(kind === 'pig' ? xp() : 5, x, y, z);
+    },
+    // 鸡下蛋：鸡蛋材料掉在鸡脚下
+    (x, y, z) => drops.spawnTool(TOOLS.egg, x, y, z),
+  );
+  // 调试钩子：控制台 __spawnMob('pig'|'zombie'|'skeleton'|'creeper'|...) 在玩家面前生成生物
+  (window as unknown as { __spawnMob: (k: MobKind) => void }).__spawnMob = (
+    k,
+  ) => {
+    mobManager.spawn(k, body.x + 3, body.y + 1, body.z + 3);
+  };
 
   // ---- 玩家（有存档则恢复位置/视角/飞行） ----
   const body = new PlayerBody(world);
@@ -187,6 +275,44 @@ function startGame(
     body.x = 8.5;
     body.z = 8.5;
     body.y = Math.max(worldGen.heightAt(8, 8), SEA_LEVEL) + 2;
+  }
+
+  // ---- 游戏模式与生命体征（生存：心/饥饿/摔落/死亡；创造：无敌可飞） ----
+  const gameMode: GameMode = save?.meta.mode ?? mode;
+  const spawnPos = {
+    x: 8.5,
+    y: Math.max(worldGen.heightAt(8, 8), SEA_LEVEL) + 2,
+    z: 8.5,
+  };
+  // 重生点：默认世界出生点，睡过床后更新为床位置（MC）
+  let spawnPoint = { ...spawnPos };
+  {
+    const sp = save?.meta.spawnPoint;
+    if (sp && Number.isFinite(sp.x) && Number.isFinite(sp.y) && Number.isFinite(sp.z))
+      spawnPoint = { x: sp.x, y: sp.y, z: sp.z };
+  }
+  let hp = 20;
+  let hunger = 20;
+  if (gameMode === 'survival') {
+    body.flying = false; // 生存禁止飞行（含读档残留的飞行状态）
+    const shp = save?.meta.player.hp;
+    const shu = save?.meta.player.hunger;
+    if (Number.isFinite(shp)) hp = Math.max(1, Math.min(20, shp!));
+    if (Number.isFinite(shu)) hunger = Math.max(0, Math.min(20, shu!));
+  }
+  let dead = false;
+  let hurtInvuln = 0;
+  let fallDist = 0;
+  let exhaustion = 0;
+  let regenTimer = 0;
+  let starveTimer = 0;
+  let xp = 0;
+  let xpLevel = 0;
+  if (gameMode === 'survival' && save) {
+    const sx = save.meta.player.xp;
+    const sl = save.meta.player.level;
+    if (Number.isFinite(sx)) xp = Math.max(0, sx!);
+    if (Number.isFinite(sl)) xpLevel = Math.max(0, sl!);
   }
 
   // 诊断钩子（控制台调试用）；__mc 在 controls 创建后才赋值（TDZ）
@@ -220,11 +346,111 @@ function startGame(
   const hud = new Hud();
   const debugPanel = new DebugPanel();
   const sfx = new Sfx();
-  const hotbar = new Hotbar(registry.hotbar, atlas.canvas, (def) => {
-    hud.showItemName(def.display);
-    hand.setBlock(def); // 切换槽位：换手持模型 + equip 动画
-  });
-  hand.setBlock(hotbar.current);
+  // 槽位 → 手持物 + 名称（方块模型 / 食物平面 / 空手）
+  const syncHand = (slot: HotSlot): void => {
+    if (slot.block) {
+      hand.setBlock(slot.block.def);
+      hud.showItemName(slot.block.def.display);
+    } else if (slot.food) {
+      hand.setFood(slot.food.def.texture);
+      hud.showItemName(slot.food.def.name);
+    } else if (slot.tool) {
+      hand.setFood(slot.tool.def.texture); // 工具同为平面斜持
+      hud.showItemName(slot.tool.def.name);
+    } else {
+      hand.setEmpty();
+    }
+  };
+  // 生存模式快捷栏从空开始、方块计数消耗；创造模式 9 方块无限
+  const hotbar = new Hotbar(
+    gameMode === 'creative' ? registry.hotbar : new Array(9).fill(null),
+    atlas.canvas,
+    syncHand,
+    gameMode === 'survival',
+  );
+  // 生存读档：恢复快捷栏内容
+  if (gameMode === 'survival' && save?.meta.hotbar) {
+    hotbar.restore(
+      save.meta.hotbar,
+      (id) => registry.def(id),
+      (fid) => FOODS[fid as keyof typeof FOODS] ?? null,
+      (tid) => TOOLS[tid] ?? null,
+    );
+  }
+  syncHand(hotbar.current);
+
+  // ---- 生存背包（E 开关）：27 主栏 + 2×2 合成，光标拿放 ----
+  // 主栏数组与合成台/熔炉共享，三个界面数据实时一致
+  const invMain: HotSlot[] = Array.from({ length: 27 }, emptyHotSlot);
+  /** 把槽位内容掉落在指定位置（背包退不下/熔炉破坏散出共用） */
+  const dropSlotAt = (slot: HotSlot, x: number, y: number, z: number): void => {
+    if (slot.block)
+      drops.spawnBlock(slot.block.def, x, y, z, slot.block.count);
+    else if (slot.food)
+      drops.spawnFood(slot.food.def, x, y, z, slot.food.count);
+    else if (slot.tool)
+      drops.spawnTool(slot.tool.def, x, y, z, slot.tool.count, slot.tool.dur);
+  };
+  const invCallbacks = {
+    onClose: () => controls.lock(),
+    onDropSlot: (slot: HotSlot) => dropSlotAt(slot, body.x, body.y + 0.5, body.z),
+  };
+  const survivalInv = new SurvivalInventory(
+    registry,
+    atlas.canvas,
+    hotbar,
+    invCallbacks,
+    invMain,
+  );
+  // ---- 合成台 3×3（右键工作台方块打开，共享主栏/快捷栏） ----
+  const craftingTable = new CraftingTable(
+    registry,
+    atlas.canvas,
+    hotbar,
+    invMain,
+    invCallbacks,
+  );
+  // ---- 熔炉：位置 → 状态；右键打开 UI，后台持续烧炼 ----
+  const furnaces = new Map<string, FurnaceState>();
+  const getFurnace = (x: number, y: number, z: number): FurnaceState => {
+    const key = `${x},${y},${z}`;
+    let st = furnaces.get(key);
+    if (!st) {
+      st = newFurnace(x, y, z);
+      furnaces.set(key, st);
+    }
+    return st;
+  };
+  /** 烧炼产物 → 物品槽位 */
+  const resolveSmeltOut = (out: SmeltOut): HotSlot | null => {
+    if (out.kind === 'block') {
+      const def = registry.byName.get(out.id);
+      return def ? { block: { def, count: 1 }, food: null, tool: null } : null;
+    }
+    if (out.kind === 'food') {
+      const fd = FOODS[out.id as keyof typeof FOODS];
+      return fd ? { block: null, food: { def: fd, count: 1 }, tool: null } : null;
+    }
+    const td = TOOLS[out.id];
+    return td ? { block: null, food: null, tool: { def: td, count: 1 } } : null;
+  };
+  const furnaceUI = new FurnaceUI(atlas.canvas, hotbar, invMain, invCallbacks);
+  // 读档：恢复熔炉状态
+  if (save?.meta.furnaces) {
+    for (const sf of save.meta.furnaces) {
+      const st = newFurnace(sf.p[0], sf.p[1], sf.p[2]);
+      st.input = resolveSlot(sf.i, (id) => registry.def(id), (fid) => FOODS[fid as keyof typeof FOODS] ?? null, (tid) => TOOLS[tid] ?? null);
+      st.fuel = resolveSlot(sf.f, (id) => registry.def(id), (fid) => FOODS[fid as keyof typeof FOODS] ?? null, (tid) => TOOLS[tid] ?? null);
+      st.output = resolveSlot(sf.o, (id) => registry.def(id), (fid) => FOODS[fid as keyof typeof FOODS] ?? null, (tid) => TOOLS[tid] ?? null);
+      st.burn = sf.burn;
+      st.burnMax = sf.burnMax || 1;
+      st.cook = sf.cook;
+      furnaces.set(`${st.x},${st.y},${st.z}`, st);
+    }
+  }
+  // 生存读档：恢复背包主栏
+  if (gameMode === 'survival' && save?.meta.inv)
+    survivalInv.restoreMain(save.meta.inv);
 
   // ---- 创造模式物品栏（E 开关，点击放入当前槽位） ----
   const inventory = new Inventory(
@@ -276,9 +502,13 @@ function startGame(
   let stepDist = 0;
   let sprinting = false;
   let underwater = false;
+  let eatTimer = 0;
+  let nextCrunch = 0.4;
+  let bowCharge = 0; // 弓蓄力进度（秒，>0 表示正在拉弓）
 
   const controls = new Controls(renderer.domElement, {
     onToggleFly: () => {
+      if (gameMode === 'survival') return; // 生存无飞行
       body.flying = !body.flying;
       if (body.flying) body.vy = 0;
     },
@@ -299,11 +529,18 @@ function startGame(
       body.sneaking = v;
     },
     onSprint: () => {
-      if (!body.flying) sprinting = true;
+      // 生存：饥饿值 ≤6 无法冲刺（MC 一致）
+      if (!body.flying && (gameMode !== 'survival' || hunger > 6))
+        sprinting = true;
     },
     onInventory: () => {
-      if (state === 'playing' && controls.locked && !inventory.isOpen)
-        inventory.open();
+      // 创造开 give-me 物品栏；生存开背包+2×2 合成界面
+      if (state !== 'playing' || !controls.locked) return;
+      if (gameMode === 'creative') {
+        if (!inventory.isOpen) inventory.open();
+      } else if (!survivalInv.isOpen && !craftingTable.isOpen && !furnaceUI.isOpen) {
+        survivalInv.open();
+      }
     },
   });
   if (save) {
@@ -312,8 +549,16 @@ function startGame(
   }
   controls.onWheel = (dir) => hotbar.scroll(dir);
   controls.onLockChange = (locked) => {
-    // 物品栏打开时不弹暂停菜单（二者都是解锁状态）
-    hud.setPauseHint(state === 'playing' && !locked && !inventory.isOpen);
+    // 物品栏打开或死亡界面时不弹暂停菜单（都是解锁状态）
+    hud.setPauseHint(
+      state === 'playing' &&
+        !locked &&
+        !inventory.isOpen &&
+        !survivalInv.isOpen &&
+        !craftingTable.isOpen &&
+        !furnaceUI.isOpen &&
+        !dead,
+    );
   };
 
   // ---- 视频设置：渲染距离滑块（localStorage 持久化，即时生效） ----
@@ -336,6 +581,103 @@ function startGame(
     localStorage.setItem('mc-render-dist', String(v));
   };
   document.getElementById('resume-btn')!.onclick = () => controls.lock();
+
+  // ---- 经验：MC 升级曲线（≤15 级 2L+7，≤30 级 5L-38，之后 9L-158） ----
+  const xpToNext = (l: number): number =>
+    l < 16 ? 2 * l + 7 : l < 31 ? 5 * l - 38 : 9 * l - 158;
+  const addXp = (v: number): void => {
+    xp += v;
+    while (xp >= xpToNext(xpLevel)) {
+      xp -= xpToNext(xpLevel);
+      xpLevel++;
+    }
+    hud.setXp(xpLevel, xp / xpToNext(xpLevel), gameMode === 'survival');
+  };
+  hud.setXp(xpLevel, xp / xpToNext(xpLevel), gameMode === 'survival');
+
+  // ---- 生存：受伤 / 死亡 / 重生 ----
+  const deathScreen = document.getElementById('death-screen')!;
+  const hurtPlayer = (dmg: number, kbx = 0, kbz = 0): void => {
+    if (gameMode !== 'survival' || dead || hurtInvuln > 0) return;
+    hurtInvuln = 0.5;
+    hp = Math.max(0, hp - dmg);
+    hud.hurtFlash();
+    sfx.playHurt();
+    if (kbx !== 0 || kbz !== 0) {
+      const len = Math.hypot(kbx, kbz) || 1;
+      body.vx = (kbx / len) * 6;
+      body.vz = (kbz / len) * 6;
+      if (body.onGround) body.vy = 3.6;
+    }
+    if (hp <= 0) {
+      // 死亡掉落：快捷栏全部物品原地散出 + 经验球（MC 跑尸回收）
+      const spill = hotbar.serialize();
+      for (const s of spill) {
+        if (!s) continue;
+        if ('b' in s) {
+          const def = registry.def(s.b);
+          if (def) drops.spawnBlock(def, body.x, body.y + 0.5, body.z, s.n);
+        } else if ('f' in s) {
+          const fd = FOODS[s.f as keyof typeof FOODS];
+          if (fd) drops.spawnFood(fd, body.x, body.y + 0.5, body.z, s.n);
+        } else {
+          const td = TOOLS[s.t];
+          if (td) drops.spawnTool(td, body.x, body.y + 0.5, body.z, s.n, s.d);
+        }
+      }
+      hotbar.clearAll();
+      // 背包主栏同样散出（MC 死亡全身掉落）
+      const spillMain = survivalInv.serializeMain();
+      for (const s of spillMain) {
+        if (!s) continue;
+        if ('b' in s) {
+          const def = registry.def(s.b);
+          if (def) drops.spawnBlock(def, body.x, body.y + 0.5, body.z, s.n);
+        } else if ('f' in s) {
+          const fd = FOODS[s.f as keyof typeof FOODS];
+          if (fd) drops.spawnFood(fd, body.x, body.y + 0.5, body.z, s.n);
+        } else {
+          const td = TOOLS[s.t];
+          if (td) drops.spawnTool(td, body.x, body.y + 0.5, body.z, s.n, s.d);
+        }
+      }
+      survivalInv.restoreMain([]);
+      xpManager.spawn(
+        Math.min(100, xpLevel * 7 + xp),
+        body.x,
+        body.y + 0.5,
+        body.z,
+      );
+      xp = 0;
+      xpLevel = 0;
+      hud.setXp(0, 0, true);
+      dead = true;
+      attackHeld = false;
+      useHeld = false;
+      document.exitPointerLock();
+      deathScreen.classList.remove('hidden');
+    }
+  };
+  document.getElementById('respawn-btn')!.onclick = () => {
+    // 重生：满状态回出生点（MC 死亡不掉落简化：本版无物品掉落）
+    hp = 20;
+    hunger = 20;
+    fallDist = 0;
+    exhaustion = 0;
+    regenTimer = 0;
+    starveTimer = 0;
+    hurtInvuln = 0;
+    body.x = spawnPoint.x;
+    body.y = spawnPoint.y;
+    body.z = spawnPoint.z;
+    body.vx = 0;
+    body.vy = 0;
+    body.vz = 0;
+    body.flying = false;
+    dead = false;
+    deathScreen.classList.add('hidden');
+    controls.lock();
+  };
 
   // ---- 平滑光照（AO）开关：通知 Worker 并重网格化，localStorage 持久化 ----
   const aoCheck = document.getElementById('ao-check') as HTMLInputElement;
@@ -394,9 +736,18 @@ function startGame(
             yaw: controls.yaw,
             pitch: controls.pitch,
             flying: body.flying,
+            hp,
+            hunger,
+            xp,
+            level: xpLevel,
           },
           savedAt: Date.now(),
           dayTime: sky.timeValue,
+          mode: gameMode,
+          hotbar: gameMode === 'survival' ? hotbar.serialize() : undefined,
+          inv: gameMode === 'survival' ? survivalInv.serializeMain() : undefined,
+          furnaces: [...furnaces.values()].map(serializeFurnace),
+          spawnPoint: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
         },
         modifiedChunks,
       )
@@ -442,19 +793,208 @@ function startGame(
     if (data) modifiedChunks.set(chunkKey(edit.cx, edit.cz), data);
   }
 
+  /**
+   * 苦力怕爆炸（MC TNT/苦力怕规则简化版）：
+   *  - 半径 3 球形破坏，基岩（hardness<0）免疫，30% 概率掉落方块实体
+   *  - 玩家距离衰减伤害：中心 15，7 格外无伤；击退方向从爆心指向玩家
+   *  - 灰烟粒子 + 爆炸音效；破坏经 applyEdit 自动入存档修改集
+   */
+  function explode(x: number, y: number, z: number): void {
+    const R = 3;
+    const cx = Math.floor(x);
+    const cy = Math.floor(y);
+    const cz = Math.floor(z);
+    for (let dx = -R; dx <= R; dx++)
+      for (let dy = -R; dy <= R; dy++)
+        for (let dz = -R; dz <= R; dz++) {
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (dist > R + 0.4) continue; // 圆角球形
+          const bx = cx + dx;
+          const by = cy + dy;
+          const bz = cz + dz;
+          const id = world.getBlock(bx, by, bz);
+          if (id === AIR) continue;
+          const def = registry.def(id);
+          if (!def || def.hardness < 0) continue; // 基岩免疫
+          applyEdit(bx, by, bz, AIR);
+          if (Math.random() < 0.3) {
+            const drop = dropFor(def);
+            if (drop) drops.spawnBlock(drop, bx + 0.5, by + 0.5, bz + 0.5);
+          }
+        }
+    // 玩家伤害与击退（hurtPlayer 内部已判创造无敌）
+    const pdx = body.x - x;
+    const pdy = body.y + 0.9 - y;
+    const pdz = body.z - z;
+    const pd = Math.hypot(pdx, pdy, pdz);
+    if (pd < 7) {
+      const dmg = Math.round(15 * (1 - pd / 7));
+      if (dmg > 0) hurtPlayer(dmg, pdx, pdz);
+    }
+    for (let i = 0; i < 8; i++)
+      particles.spawn(
+        x + (Math.random() - 0.5) * 2,
+        y + Math.random() * 1.5,
+        z + (Math.random() - 0.5) * 2,
+        0.55,
+        0.55,
+        0.55,
+      );
+    sfx.playExplosion();
+  }
+
+  /** 箭矢存量（快捷栏 + 背包主栏；MC 允许箭在背包任意位置） */
+  function arrowCount(): number {
+    let n = survivalInv.countMaterial('arrow');
+    for (let i = 0; i < 9; i++) {
+      const s = hotbar.slotAt(i);
+      if (s.tool && s.tool.def.id === 'arrow') n += s.tool.count;
+    }
+    return n;
+  }
+
+  /** 消耗 1 支箭：快捷栏优先（MC 顺序），其次背包主栏 */
+  function consumeArrow(): void {
+    for (let i = 0; i < 9; i++) {
+      const s = hotbar.slotAt(i);
+      if (s.tool && s.tool.def.id === 'arrow' && s.tool.count > 0) {
+        s.tool.count--;
+        hotbar.setSlotAt(i, s.tool.count <= 0 ? emptyHotSlot() : s);
+        return;
+      }
+    }
+    survivalInv.consumeMaterial('arrow');
+  }
+
+  /**
+   * 放箭：蓄力 0..1 → 速度 8~32、伤害 1~9（MC 满弓 9 伤害）；
+   * 生存消耗 1 箭 + 弓 1 点耐久（385 次），创造不耗箭
+   */
+  function fireBow(charge: number): void {
+    camera.getWorldDirection(tmpDir);
+    const eye = camera.position;
+    arrowManager.spawn(
+      eye.x + tmpDir.x * 0.5,
+      eye.y + tmpDir.y * 0.5 - 0.1,
+      eye.z + tmpDir.z * 0.5,
+      tmpDir.x,
+      tmpDir.y,
+      tmpDir.z,
+      8 + charge * 24,
+      false,
+      Math.round(1 + charge * 8),
+    );
+    if (gameMode === 'survival') {
+      consumeArrow();
+      damageHeldTool(1);
+    }
+    sfx.playShoot();
+  }
+
+  /** 矿石经验表（MC：煤矿 0-2，钻石 3-7；铁/金需烧炼不给经验） */
+  const ORE_XP: Record<string, () => number> = {
+    coal_ore: () => Math.floor(Math.random() * 3),
+    diamond_ore: () => 3 + Math.floor(Math.random() * 5),
+  };
+
+  /** 破坏掉落表：草方块→泥土、石头→圆石（MC），玻璃/树叶→无，其余→自身 */
+  function dropFor(def: BlockDef): BlockDef | null {
+    if (def.name === 'grass_block')
+      return registry.byName.get('dirt') ?? def;
+    if (def.name === 'stone')
+      return registry.byName.get('cobblestone') ?? def;
+    if (def.name === 'glass' || def.name === 'oak_leaves') return null;
+    return def;
+  }
+
+  /** 手持工具掉耐久（生存）；耗尽工具损坏消失并重绘耐久条/同步手持 */
+  function damageHeldTool(n: number): void {
+    if (gameMode !== 'survival') return;
+    const s = hotbar.current;
+    if (!s.tool || s.tool.def.maxDurability <= 0) return;
+    const dur = (s.tool.dur ?? s.tool.def.maxDurability) - n;
+    if (dur <= 0) {
+      s.tool = null;
+      sfx.playBreak();
+    } else {
+      s.tool.dur = dur;
+    }
+    hotbar.setSlotAt(hotbar.selected, s);
+  }
+
   function breakBlock(x: number, y: number, z: number): void {
     const id = world.getBlock(x, y, z);
     const def = registry.def(id);
     if (!def || def.hardness < 0) return;
     applyEdit(x, y, z, AIR);
+    // 生存模式：方块实体掉落 + 矿石经验（创造无掉落，MC 一致）
+    // 石质矿物需镐达到层级才可采集，否则破坏无掉落（MC 规则）
+    if (gameMode === 'survival') {
+      const heldTool = hotbar.current.tool?.def ?? null;
+      if (canHarvest(def.name, heldTool)) {
+        // 煤矿掉煤物品（MC 一致），其余走方块掉落表
+        if (def.name === 'coal_ore') {
+          drops.spawnTool(TOOLS.coal, x + 0.5, y + 0.5, z + 0.5);
+        } else {
+          const dd = dropFor(def);
+          if (dd) drops.spawnBlock(dd, x + 0.5, y + 0.5, z + 0.5);
+        }
+        const oreXp = ORE_XP[def.name];
+        if (oreXp) {
+          const v = oreXp();
+          if (v > 0) xpManager.spawn(v, x + 0.5, y + 0.5, z + 0.5);
+        }
+      }
+      // 熔炉被破坏：内容物（原料/燃料/产物）原地散出，无论能否采集本体
+      if (def.name === 'furnace') {
+        const key = `${x},${y},${z}`;
+        const st = furnaces.get(key);
+        if (st) {
+          for (const slot of [st.input, st.fuel, st.output])
+            dropSlotAt(slot, x + 0.5, y + 0.5, z + 0.5);
+          furnaces.delete(key);
+        }
+      }
+    }
     const [r, g, b] = tileColorOf(def);
     particles.spawn(x + 0.5, y + 0.5, z + 0.5, r, g, b);
     sfx.playBreak();
+    // MC：生存模式每破坏一个有硬度的方块，手持工具 -1 耐久
+    if (gameMode === 'survival' && def.hardness > 0) damageHeldTool(1);
+  }
+
+  // ---- 睡觉：夜晚右键床 → 黑屏渐隐 → 快进到清晨 + 设重生点（MC） ----
+  let sleeping = false;
+  const sleepOverlay = document.getElementById('sleep-overlay')!;
+  function trySleep(bx: number, by: number, bz: number): void {
+    if (sleeping || dead) return;
+    const tod = sky.timeOfDay;
+    const isNight = tod >= 0.74 || tod <= 0.24;
+    if (!isNight) {
+      hud.showItemName('你只能在夜晚睡觉');
+      return;
+    }
+    sleeping = true;
+    spawnPoint = { x: bx + 0.5, y: by + 1, z: bz + 0.5 };
+    sleepOverlay.classList.add('on');
+    setTimeout(() => {
+      const day0 = Math.floor(sky.timeValue / DAY_LENGTH) * DAY_LENGTH;
+      const wake = day0 + (tod >= 0.74 ? DAY_LENGTH : 0) + DAY_LENGTH * 0.25;
+      sky.setTime(wake);
+      saveNow();
+      sleepOverlay.classList.remove('on');
+      hud.showItemName('重生点已设置');
+      setTimeout(() => {
+        sleeping = false;
+      }, 950);
+    }, 950);
   }
 
   function placeBlock(): void {
     if (!currentHit) return;
-    const def = hotbar.current;
+    const slot = hotbar.current;
+    if (!slot.block) return; // 空手/食物不可放置
+    const def = slot.block.def;
     const tx = currentHit.x + currentHit.nx;
     const ty = currentHit.y + currentHit.ny;
     const tz = currentHit.z + currentHit.nz;
@@ -465,6 +1005,7 @@ function startGame(
     }
     if (def.solid && body.intersectsBlock(tx, ty, tz)) return; // 不能放进自己身体
     applyEdit(tx, ty, tz, def.id);
+    hotbar.consumeBlock(); // 生存计数 -1（创造空操作）
     sfx.playPlace();
   }
 
@@ -483,7 +1024,20 @@ function startGame(
       5,
     );
 
-    if (currentHit) {
+    // 生物拾取：命中生物且比方块更近时优先攻击（MC 行为）
+    const mobHit = mobManager.raycastMob(
+      eye.x,
+      eye.y,
+      eye.z,
+      tmpDir.x,
+      tmpDir.y,
+      tmpDir.z,
+      5,
+    );
+    const mobPriority =
+      mobHit !== null && (!currentHit || mobHit.dist < currentHit.dist);
+
+    if (currentHit && !mobPriority) {
       highlight.visible = true;
       highlight.position.set(
         currentHit.x + 0.5,
@@ -494,9 +1048,18 @@ function startGame(
       highlight.visible = false;
     }
 
+    // 攻击生物：按住连击（生物 0.5s 无敌帧限频），击退方向取视线水平分量
+    // MC：工具当武器使用每次命中 -2 耐久
+    if (attackHeld && mobPriority && mobHit) {
+      if (mobHit.mob.damage(tmpDir.x, tmpDir.z, 1)) {
+        sfx.playHurt();
+        damageHeldTool(2);
+      }
+    }
+
     // 破坏
     let cracking = false;
-    if (attackHeld && currentHit) {
+    if (attackHeld && currentHit && !mobPriority) {
       const def = registry.def(currentHit.block);
       const key = `${currentHit.x},${currentHit.y},${currentHit.z}`;
       if (def && def.hardness >= 0) {
@@ -504,11 +1067,14 @@ function startGame(
           breakKey = key;
           breakProgress = 0;
         }
-        if (def.hardness === 0) {
+        if (def.hardness === 0 || gameMode === 'creative') {
           breakBlock(currentHit.x, currentHit.y, currentHit.z);
           breakKey = '';
         } else {
-          breakProgress += dt / (def.hardness * 1.5);
+          // 工具加成：对应工具类型才有速度倍率（MC：木 2×、石 4×）
+          const heldTool = hotbar.current.tool?.def ?? null;
+          const mult = gameMode === 'survival' ? miningSpeed(def.name, heldTool) : 1;
+          breakProgress += (dt * mult) / (def.hardness * 1.5);
           if (breakProgress >= 1) {
             breakBlock(currentHit.x, currentHit.y, currentHit.z);
             breakProgress = 0;
@@ -531,11 +1097,24 @@ function startGame(
     }
     crackMesh.visible = cracking;
 
-    // 放置（按住以约 4.5/s 连放）
+    // 放置（按住以约 4.5/s 连放）；右键工作台方块打开 3×3 合成界面
     useCooldown -= dt;
     if (useHeld && useCooldown <= 0) {
-      placeBlock();
-      useCooldown = 0.22;
+      const hitDef =
+        currentHit && !mobPriority ? registry.def(currentHit.block) : null;
+      if (hitDef && hitDef.name === 'crafting_table') {
+        craftingTable.open();
+        useCooldown = 0.3;
+      } else if (hitDef && hitDef.name === 'furnace') {
+        furnaceUI.open(getFurnace(currentHit!.x, currentHit!.y, currentHit!.z));
+        useCooldown = 0.3;
+      } else if (hitDef && hitDef.name === 'bed') {
+        trySleep(currentHit!.x, currentHit!.y, currentHit!.z);
+        useCooldown = 0.3;
+      } else {
+        placeBlock();
+        useCooldown = 0.22;
+      }
     }
   }
 
@@ -554,7 +1133,7 @@ function startGame(
     startScreen.hide();
     state = 'playing';
     controls.lock();
-    hud.showItemName(hotbar.current.display);
+    syncHand(hotbar.current);
   };
 
   // ---- 主循环 ----
@@ -631,8 +1210,170 @@ function startGame(
         }
       }
 
+      // 摔落伤害（生存）：累计下落距离，落地结算，飞行/落水豁免
+      if (gameMode === 'survival' && !dead) {
+        if (body.flying || body.inWater) {
+          fallDist = 0;
+        } else if (!body.onGround && body.vy < 0) {
+          fallDist -= body.vy * dt;
+        } else if (body.onGround) {
+          if (fallDist > 3) hurtPlayer(Math.floor(fallDist - 3));
+          fallDist = 0;
+        }
+
+        // 饥饿消耗 / 饱食回复 / 饥饿掉血（MC 机制简化）
+        const moving = Math.hypot(body.vx, body.vz) > 0.5;
+        exhaustion += dt * (sprinting && moving ? 0.6 : moving ? 0.08 : 0.015);
+        if (exhaustion >= 30) {
+          exhaustion = 0;
+          hunger = Math.max(0, hunger - 1);
+        }
+        if (hunger >= 18 && hp < 20) {
+          regenTimer += dt;
+          if (regenTimer >= 4) {
+            regenTimer = 0;
+            hp = Math.min(20, hp + 1);
+            exhaustion += 6;
+          }
+        } else {
+          regenTimer = 0;
+        }
+        if (hunger <= 0) {
+          starveTimer += dt;
+          if (starveTimer >= 4 && hp > 1) {
+            starveTimer = 0;
+            hp = Math.max(1, hp - 1);
+            hud.hurtFlash();
+          }
+        } else {
+          starveTimer = 0;
+        }
+        if (hunger <= 6) sprinting = false;
+        hurtInvuln = Math.max(0, hurtInvuln - dt);
+      }
+      hud.setVitals(hp, hunger, gameMode === 'survival');
+
       updateInteraction(dt);
       hand.update(dt, Math.hypot(body.vx, body.vz), body.onGround, attackHeld);
+      // 生物：游荡 AI + 追击 + 生成/消失（暂停菜单打开时随世界冻结）
+      // 僵尸近战：生存扣 3 血（1.5 心）并击退；骷髅射箭；苦力怕引爆
+      mobManager.update(
+        dt,
+        body.x,
+        body.y,
+        body.z,
+        sky.daylight,
+        (m) => {
+          hurtPlayer(3, body.x - m.x, body.z - m.z);
+        },
+        // 骷髅放箭：从眼部高度朝玩家胸口，重力补偿抬枪口 + 少量散布
+        (m) => {
+          const sx = m.x;
+          const sy = m.y + m.height * 0.85;
+          const sz = m.z;
+          const tx = body.x - sx;
+          const tz = body.z - sz;
+          const ty0 = body.y + 1.2 - sy;
+          const flat = Math.hypot(tx, tz);
+          const t = Math.max(0.2, flat / 14); // 与 arrows.ts SPEED 一致
+          let vx = tx;
+          let vy = ty0 + 0.5 * 9 * t * t; // 抛物线补偿
+          let vz = tz;
+          const len = Math.hypot(vx, vy, vz) || 1;
+          vx = vx / len + (Math.random() - 0.5) * 0.04;
+          vy = vy / len + (Math.random() - 0.5) * 0.04;
+          vz = vz / len + (Math.random() - 0.5) * 0.04;
+          const l2 = Math.hypot(vx, vy, vz) || 1;
+          arrowManager.spawn(sx, sy, sz, vx / l2, vy / l2, vz / l2);
+          sfx.playShoot();
+        },
+        // 苦力怕引爆：地形破坏 + 伤害（mob 由 manager 移除）
+        (m) => explode(m.x, m.y + m.height * 0.5, m.z),
+        // 苦力怕点燃引信：嘶嘶声
+        () => sfx.playFuse(),
+      );
+
+      // 箭矢：抛物线飞行；敌对箭命中玩家扣血（创造/无敌帧由 hurtPlayer 判定），
+      // 玩家箭命中生物按蓄力伤害 + 击退
+      arrowManager.update(
+        dt,
+        body.x,
+        body.y,
+        body.z,
+        (dmg) => hurtPlayer(dmg),
+        undefined,
+        (x, y, z, dmg, vx, vz) => mobManager.arrowHit(x, y, z, dmg, vx, vz),
+      );
+
+      // 掉落物：旋转/浮动/拾取（方块/食物均可入快捷栏，满则留在原地）
+      drops.update(dt, body.x, body.y + 0.9, body.z, (item) => {
+        let ok = true;
+        for (let k = 0; k < item.n; k++) {
+          const added =
+            item.kind === 'food'
+              ? hotbar.addFood(item.def)
+              : item.kind === 'tool'
+                ? hotbar.addTool(item.def, item.dur)
+                : hotbar.addBlock(item.def);
+          if (!added) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) sfx.playPickup();
+        return ok;
+      });
+
+      // 经验球：吸附拾取 → 升级曲线结算
+      xpManager.update(dt, body.x, body.y + 0.9, body.z, (v) => {
+        addXp(v);
+        sfx.playXp();
+      });
+
+      // 熔炉：后台持续烧炼（MC：关闭界面不中断）；UI 打开时标脏刷新
+      for (const st of furnaces.values()) {
+        if (tickFurnace(st, dt, resolveSmeltOut)) furnaceUI.markDirty();
+      }
+      furnaceUI.update();
+
+      // 进食：手持食物按住右键 1.6s（MC 进食时长），松手/切槽重置
+      const curSlot = hotbar.current;
+      if (
+        useHeld &&
+        curSlot.food &&
+        gameMode === 'survival' &&
+        hunger < 20 &&
+        !dead
+      ) {
+        eatTimer += dt;
+        if (eatTimer >= nextCrunch) {
+          nextCrunch += 0.4;
+          sfx.playEat();
+        }
+        if (eatTimer >= 1.6) {
+          hunger = Math.min(20, hunger + curSlot.food.def.hunger);
+          hotbar.consumeFood();
+          eatTimer = 0;
+          nextCrunch = 0.4;
+        }
+      } else {
+        eatTimer = 0;
+        nextCrunch = 0.4;
+      }
+
+      // 弓：手持弓按住右键蓄力（MC 满弓 1.2s），松手放箭；无箭不可蓄力
+      if (
+        useHeld &&
+        curSlot.tool?.def.id === 'bow' &&
+        !dead &&
+        (gameMode !== 'survival' || arrowCount() > 0)
+      ) {
+        bowCharge = Math.min(1.2, bowCharge + dt);
+      } else if (bowCharge > 0) {
+        const charge = bowCharge / 1.2;
+        if (charge >= 0.1) fireBow(charge); // 低于 10% 蓄力不放箭
+        bowCharge = 0;
+      }
     }
 
     // 相机（冲刺时视野外扩，平滑过渡）

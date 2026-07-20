@@ -38,6 +38,14 @@ export const TILE_NAMES = [
   'obsidian',
   'snow',
   'clay',
+  'crafting_top',
+  'crafting_side',
+  'furnace_top',
+  'furnace_side',
+  'furnace_front',
+  'bed_top',
+  'bed_side',
+  'wool',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -461,6 +469,92 @@ const paintClay: Painter = (ctx, _ox, _oy, rnd) => {
   speckle(ctx, rnd, '#9fa4b1', ['#9499a6', '#aab0bc', '#8b909d'], 0.35);
 };
 
+/** 工作台顶面：木板底 + 深色边框 + 网格线 */
+const paintCraftingTop: Painter = (ctx, _ox, _oy, rnd) => {
+  paintPlanks(ctx, _ox, _oy, rnd);
+  for (let i = 1; i < 15; i++) {
+    px(ctx, i, 5, '#5a4020');
+    px(ctx, i, 10, '#5a4020');
+    px(ctx, 5, i, '#5a4020');
+    px(ctx, 10, i, '#5a4020');
+  }
+  for (let i = 0; i < 16; i++) {
+    px(ctx, i, 0, '#4a3018');
+    px(ctx, i, 15, '#4a3018');
+    px(ctx, 0, i, '#4a3018');
+    px(ctx, 15, i, '#4a3018');
+  }
+};
+
+/** 工作台侧面：木板底 + 顶沿压线 */
+const paintCraftingSide: Painter = (ctx, _ox, _oy, rnd) => {
+  paintPlanks(ctx, _ox, _oy, rnd);
+  for (let i = 1; i < 15; i++) {
+    px(ctx, i, 2, '#5a4020');
+    px(ctx, i, 3, '#5a4020');
+  }
+  for (let i = 0; i < 16; i++) {
+    px(ctx, i, 0, '#4a3018');
+    px(ctx, i, 1, '#4a3018');
+  }
+};
+
+/** 熔炉侧/顶面基底：灰色石板 + 深色描边 */
+function paintFurnaceBase(ctx: CanvasRenderingContext2D, rnd: () => number): void {
+  speckle(ctx, rnd, '#7d7d7d', ['#757575', '#858585', '#6f6f6f'], 0.3);
+  for (let i = 0; i < 16; i++) {
+    px(ctx, i, 0, '#5a5a5a');
+    px(ctx, i, 15, '#5a5a5a');
+    px(ctx, 0, i, '#5a5a5a');
+    px(ctx, 15, i, '#5a5a5a');
+  }
+}
+
+const paintFurnaceSide: Painter = (ctx, _ox, _oy, rnd) => {
+  paintFurnaceBase(ctx, rnd);
+};
+
+const paintFurnaceTop: Painter = (ctx, _ox, _oy, rnd) => {
+  paintFurnaceBase(ctx, rnd);
+};
+
+/** 熔炉正面：石板底 + 深色炉口 + 底部火槽 */
+const paintFurnaceFront: Painter = (ctx, _ox, _oy, rnd) => {
+  paintFurnaceBase(ctx, rnd);
+  for (let y = 5; y <= 10; y++) for (let x = 4; x <= 11; x++) px(ctx, x, y, '#2a2a2a');
+  for (let y = 6; y <= 9; y++) for (let x = 5; x <= 10; x++) px(ctx, x, y, '#141414');
+  for (let x = 5; x <= 10; x++) px(ctx, x, 12, '#3a3a3a');
+  px(ctx, 5, 13, '#2a2a2a');
+  px(ctx, 10, 13, '#2a2a2a');
+};
+
+/** 床顶：北端白枕头 + 红色床身 + 深色包边 */
+const paintBedTop: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#b02830', ['#a02028', '#c03840', '#982028'], 0.25);
+  for (let y = 0; y < 4; y++)
+    for (let x = 1; x < 15; x++)
+      px(ctx, x, y, y === 0 || x === 1 || x === 14 ? '#d0d0d0' : '#f0f0f0');
+  for (let i = 0; i < 16; i++) {
+    px(ctx, i, 15, '#7a1a20');
+    px(ctx, 0, i, '#7a1a20');
+    px(ctx, 15, i, '#7a1a20');
+  }
+};
+
+/** 床侧：上沿红床垫 + 下木板床架 */
+const paintBedSide: Painter = (ctx, _ox, _oy, rnd) => {
+  paintPlanks(ctx, _ox, _oy, rnd);
+  for (let y = 0; y < 5; y++)
+    for (let x = 0; x < 16; x++) px(ctx, x, y, y === 0 ? '#c03840' : '#a02028');
+};
+
+/** 羊毛：白底细斑 + 浅灰织纹 */
+const paintWool: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#e8e8e8', ['#dcdcdc', '#f4f4f4', '#d0d0d0'], 0.3);
+  for (let i = 2; i < 16; i += 4)
+    for (let j = 0; j < 16; j++) px(ctx, j, i, '#d4d4d4');
+};
+
 const PAINTERS: Record<TileName, Painter> = {
   grass_top: paintGrassTop,
   grass_side: paintGrassSide,
@@ -490,6 +584,14 @@ const PAINTERS: Record<TileName, Painter> = {
   obsidian: paintObsidian,
   snow: paintSnow,
   clay: paintClay,
+  crafting_top: paintCraftingTop,
+  crafting_side: paintCraftingSide,
+  furnace_top: paintFurnaceTop,
+  furnace_side: paintFurnaceSide,
+  furnace_front: paintFurnaceFront,
+  bed_top: paintBedTop,
+  bed_side: paintBedSide,
+  wool: paintWool,
 };
 
 // ---------- 裂纹贴图（10 阶段，程序化绘制） ----------

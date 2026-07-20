@@ -72,6 +72,8 @@ export const TILE_NAMES = [
   'sugarcane',
   'bookshelf',
   'mossy_cobble',
+  'enchanting_top',
+  'enchanting_side',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -864,6 +866,31 @@ const PAINTERS: Record<TileName, Painter> = {
   sugarcane: paintSugarcane,
   bookshelf: paintBookshelf,
   mossy_cobble: paintMossyCobble,
+  // ---- 附魔台：黑曜石底座 + 顶部红色书面 + 中央钻石四角点缀 ----
+  enchanting_top: (ctx, _ox, _oy, rnd) => {
+    paintObsidian(ctx, _ox, _oy, rnd);
+    ctx.fillStyle = '#b03040';
+    ctx.fillRect(3, 3, 10, 10);
+    ctx.fillStyle = '#d8d8d0';
+    ctx.fillRect(4, 4, 8, 8);
+    ctx.fillStyle = '#c02828';
+    ctx.fillRect(7, 4, 2, 8);
+    ctx.fillStyle = '#4ee8d8';
+    ctx.fillRect(1, 1, 2, 2);
+    ctx.fillRect(13, 1, 2, 2);
+    ctx.fillRect(1, 13, 2, 2);
+    ctx.fillRect(13, 13, 2, 2);
+  },
+  enchanting_side: (ctx, _ox, _oy, rnd) => {
+    paintObsidian(ctx, _ox, _oy, rnd);
+    ctx.fillStyle = '#2a2a3a';
+    ctx.fillRect(0, 0, 16, 3);
+    ctx.fillStyle = '#4ee8d8';
+    ctx.fillRect(3, 5, 2, 2);
+    ctx.fillRect(11, 5, 2, 2);
+    ctx.fillStyle = '#581008';
+    ctx.fillRect(0, 12, 16, 1);
+  },
 };
 
 // ---------- 裂纹贴图（10 阶段，程序化绘制） ----------

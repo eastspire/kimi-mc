@@ -15,6 +15,7 @@
       <div id="xp-bar" class="hidden"><div id="xp-fill"></div></div>
       <div id="xp-level" class="hidden"></div>
       <div id="hearts" class="hidden"></div>
+      <div id="armor" class="hidden"></div>
       <div id="hunger" class="hidden"></div>
       <div id="hotbar"></div>
       <div id="debug"></div>
@@ -97,13 +98,14 @@
       <div id="inv2-box">
         <h2>物品栏</h2>
         <div id="inv2-top">
+          <div id="inv2-armor"></div>
           <div id="inv2-craft"></div>
           <div id="inv2-arrow">→</div>
           <div id="inv2-result"></div>
         </div>
         <div id="inv2-main"></div>
         <div id="inv2-hotbar"></div>
-        <div id="inv2-tip">左键整堆 · 右键取半/放一个 · E / ESC 关闭</div>
+        <div id="inv2-tip">左键整堆 · 右键取半/放一个 · 左上格放盔甲 · E / ESC 关闭</div>
       </div>
       <div id="inv2-cursor">
         <canvas width="44" height="44"></canvas>
@@ -160,6 +162,27 @@
         <div id="inv-grid"></div>
         <div id="inv-name">&nbsp;</div>
         <div id="inv-tip">E / ESC 关闭 · 点击方块放入当前快捷栏槽位</div>
+      </div>
+    </div>
+
+    <!-- 附魔台界面 -->
+    <div id="inv5" class="hidden">
+      <div id="inv5-box">
+        <h2>附魔</h2>
+        <div id="inv5-top">
+          <div id="inv5-slots">
+            <div id="inv5-item"></div>
+            <div id="inv5-lapis"></div>
+          </div>
+          <div id="inv5-options"></div>
+        </div>
+        <div id="inv5-main"></div>
+        <div id="inv5-hotbar"></div>
+        <div id="inv5-tip">左格放装备 · 右格放青金石 · 点击选项消耗经验附魔 · E / ESC 关闭</div>
+      </div>
+      <div id="inv5-cursor">
+        <canvas width="44" height="44"></canvas>
+        <span class="count"></span>
       </div>
     </div>
 

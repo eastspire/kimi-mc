@@ -129,9 +129,26 @@ const RECIPES: Recipe[] = [
     block: 'bookshelf',
     count: 1,
   }),
+  // ---- 盔甲（MC 摆法）：皮革 t:leather / 金 t:gold_ingot / 铁 t:iron_ingot / 钻 t:diamond ----
+  ...armorRecipes('t:leather', 'leather'),
+  ...armorRecipes('t:gold_ingot', 'gold'),
+  ...armorRecipes('t:iron_ingot', 'iron'),
+  ...armorRecipes('t:diamond', 'diamond'),
 ];
 
-/** 原料格内容：方块名；'' 表示该位置必须为空 */
+/** 生成一套盔甲的 4 件配方：头盔(5)、胸甲(8)、护腿(7)、靴(4) */
+function armorRecipes(mat: string, key: string): Recipe[] {
+  return [
+    // 头盔：顶行 3 + 两侧（5 件）
+    R(3, 2, [mat, mat, mat, mat, '', mat], { tool: `${key}_helmet`, count: 1 }),
+    // 胸甲：首行两侧 + 后两行满（8 件）
+    R(3, 3, [mat, '', mat, mat, mat, mat, mat, mat, mat], { tool: `${key}_chestplate`, count: 1 }),
+    // 护腿：顶行 3 + 两侧各两（7 件）
+    R(3, 3, [mat, mat, mat, mat, '', mat, mat, '', mat], { tool: `${key}_leggings`, count: 1 }),
+    // 靴子：两侧各两（4 件）
+    R(3, 2, [mat, '', mat, mat, '', mat], { tool: `${key}_boots`, count: 1 }),
+  ];
+}
 function cropGrid(
   grid: (string | null)[],
   w: number,

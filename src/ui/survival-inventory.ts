@@ -3,6 +3,7 @@ import type { FoodDef } from '../item/foods';
 import { FOODS } from '../item/foods';
 import type { ToolDef } from '../item/tools';
 import { toolById } from '../item/tools';
+import { armorById, type ArmorDef, type ArmorSlot } from '../item/armor';
 import { matchRecipe } from '../item/recipes';
 import {
   drawBlockIcon,
@@ -10,6 +11,7 @@ import {
   type HotSlot,
   type Hotbar,
   type SavedHotSlot,
+  type ToolStack,
 } from './hotbar';
 
 // ============================================================
@@ -26,10 +28,12 @@ const CRAFT_W = 2;
 const CRAFT_SIZE = 4;
 
 interface SlotRef {
-  area: 'craft' | 'result' | 'main' | 'hot';
+  area: 'craft' | 'result' | 'main' | 'hot' | 'armor';
   i: number;
   el: HTMLDivElement;
 }
+
+const ARMOR_ORDER: ArmorSlot[] = ['helmet', 'chestplate', 'leggings', 'boots'];
 
 export function emptyHotSlot(): HotSlot {
   return { block: null, food: null, tool: null };
@@ -66,6 +70,8 @@ export interface SurvivalInvCallbacks {
   onClose: () => void;
   /** 背包放不下时把槽位物品掉落在玩家脚下 */
   onDropSlot: (slot: HotSlot) => void;
+  /** 盔甲穿戴变化（更新 HUD 护甲条） */
+  onArmorChanged?: () => void;
 }
 
 export class SurvivalInventory {
@@ -86,8 +92,11 @@ export class SurvivalInventory {
     private hotbar: Hotbar,
     private cb: SurvivalInvCallbacks,
     sharedMain?: HotSlot[],
+    /** 盔甲栏（4 格，存 ToolStack|null，main.ts 持有并据此算护甲） */
+    private armor: (ToolStack | null)[] = [null, null, null, null],
   ) {
     this.main = sharedMain ?? Array.from({ length: MAIN_SIZE }, emptySlot);
+    this.buildGrid('inv2-armor', 'armor', 4);
     this.buildGrid('inv2-craft', 'craft', CRAFT_SIZE);
     this.buildGrid('inv2-result', 'result', 1);
     this.buildGrid('inv2-main', 'main', MAIN_SIZE);
@@ -146,6 +155,10 @@ export class SurvivalInventory {
         return this.main[ref.i];
       case 'hot':
         return this.hotbar.slotAt(ref.i);
+      case 'armor': {
+        const t = this.armor[ref.i];
+        return t ? { block: null, food: null, tool: t } : emptySlot();
+      }
       case 'result':
         return emptySlot(); // 结果格只读，由配方决定
     }
@@ -161,6 +174,10 @@ export class SurvivalInventory {
         break;
       case 'hot':
         this.hotbar.setSlotAt(ref.i, s);
+        break;
+      case 'armor':
+        this.armor[ref.i] = s.tool ?? null;
+        this.cb.onArmorChanged?.();
         break;
       case 'result':
         break;
@@ -179,7 +196,7 @@ export class SurvivalInventory {
       if (def) return { block: { def, count: out.count }, food: null, tool: null };
     }
     if (out.tool) {
-      const td = toolById(out.tool);
+      const td = toolById(out.tool) ?? armorById(out.tool);
       if (td) return { block: null, food: null, tool: { def: td, count: out.count } };
     }
     if (out.food) {
@@ -213,11 +230,37 @@ export class SurvivalInventory {
       n > 1 ? String(n) : '';
   }
 
+  /** 空盔甲格画对应部位的暗色剪影（MC 一致） */
+  private drawArmorGhost(el: HTMLDivElement, slot: ArmorSlot): void {
+    const canvas = el.querySelector('canvas')!;
+    const ctx = canvas.getContext('2d')!;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, 44, 44);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#2a2a2a';
+    const g = (x: number, y: number, w: number, h: number) =>
+      ctx.fillRect(4 + x * 2.25, 4 + y * 2.25, w * 2.25, h * 2.25);
+    if (slot === 'helmet') {
+      g(3, 3, 10, 5); g(2, 5, 12, 3); g(3, 8, 10, 2);
+    } else if (slot === 'chestplate') {
+      g(4, 2, 8, 11); g(1, 2, 3, 4); g(12, 2, 3, 4);
+    } else if (slot === 'leggings') {
+      g(3, 1, 10, 3); g(3, 4, 4, 10); g(9, 4, 4, 10);
+    } else {
+      g(2, 6, 5, 6); g(9, 6, 5, 6);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   private renderAll(): void {
     const result = this.craftResult();
     for (const ref of this.refs) {
       if (ref.area === 'result') {
         this.drawSlot(ref.el, result ?? emptySlot());
+      } else if (ref.area === 'armor' && !this.armor[ref.i]) {
+        this.drawArmorGhost(ref.el, ARMOR_ORDER[ref.i]);
+        ref.el.querySelector<HTMLSpanElement>('.count')!.textContent = '';
       } else {
         this.drawSlot(ref.el, this.getSlot(ref));
       }
@@ -246,8 +289,17 @@ export class SurvivalInventory {
     this.renderAll();
   }
 
+  /** 盔甲格只收对应部位的盔甲（cursor 为空则允许取出） */
+  private armorFits(ref: SlotRef, cursor: HotSlot): boolean {
+    if (isEmpty(cursor)) return true;
+    if (!cursor.tool) return false;
+    const ad: ArmorDef | null = armorById(cursor.tool.def.id);
+    return ad !== null && ad.slot === ARMOR_ORDER[ref.i];
+  }
+
   /** 左键：空手拿整堆 / 同类合并 / 空格放整堆 / 异类交换 */
   private leftClick(ref: SlotRef): void {
+    if (ref.area === 'armor' && !this.armorFits(ref, this.cursor)) return;
     const s = this.getSlot(ref);
     if (isEmpty(this.cursor)) {
       if (isEmpty(s)) return;
@@ -283,6 +335,11 @@ export class SurvivalInventory {
 
   /** 右键：空手拿一半 / 同类或空格放一个 */
   private rightClick(ref: SlotRef): void {
+    // 盔甲格：整件拿/放，与左键一致（盔甲不可堆叠）
+    if (ref.area === 'armor') {
+      this.leftClick(ref);
+      return;
+    }
     const s = this.getSlot(ref);
     if (isEmpty(this.cursor)) {
       if (isEmpty(s)) return;
@@ -452,6 +509,29 @@ export class SurvivalInventory {
     return false;
   }
 
+  /** 盔甲栏序列化（与工具槽位同格式） */
+  serializeArmor(): (SavedHotSlot | null)[] {
+    return this.armor.map((t) => {
+      if (!t) return null;
+      const out: SavedHotSlot = { t: t.def.id, n: 1 };
+      if (t.dur !== undefined) out.d = t.dur;
+      if (t.ench && Object.keys(t.ench).length > 0) out.e = t.ench;
+      return out;
+    });
+  }
+
+  restoreArmor(saved: (SavedHotSlot | null)[] | undefined): void {
+    for (let i = 0; i < 4; i++) {
+      const s = saved?.[i];
+      if (s && 't' in s) {
+        const ad = armorById(s.t);
+        this.armor[i] = ad ? { def: ad, count: 1, dur: s.d, ench: s.e } : null;
+      } else {
+        this.armor[i] = null;
+      }
+    }
+  }
+
   serializeMain(): (SavedHotSlot | null)[] {
     return this.main.map((s) => {
       if (s.block) return { b: s.block.def.id, n: s.block.count };
@@ -459,6 +539,7 @@ export class SurvivalInventory {
       if (s.tool) {
         const out: SavedHotSlot = { t: s.tool.def.id, n: s.tool.count };
         if (s.tool.dur !== undefined) out.d = s.tool.dur;
+        if (s.tool.ench && Object.keys(s.tool.ench).length > 0) out.e = s.tool.ench;
         return out;
       }
       return null;
@@ -478,9 +559,9 @@ export class SurvivalInventory {
         if (fd)
           slot = { block: null, food: { def: fd, count: Math.max(1, s.n | 0) }, tool: null };
       } else if (s && 't' in s) {
-        const td: ToolDef | null = toolById(s.t);
+        const td: ToolDef | null = toolById(s.t) ?? armorById(s.t);
         if (td)
-          slot = { block: null, food: null, tool: { def: td, count: Math.max(1, s.n | 0), dur: s.d } };
+          slot = { block: null, food: null, tool: { def: td, count: Math.max(1, s.n | 0), dur: s.d, ench: s.e } };
       }
       this.main[i] = slot;
     }

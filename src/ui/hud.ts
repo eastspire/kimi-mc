@@ -25,6 +25,17 @@ const FOOD_SHAPE = [
   '..B....',
 ];
 
+/** 7×7 像素胸甲（护甲条图标） */
+const ARMOR_SHAPE = [
+  '.XXXXX.',
+  'XXXXXXX',
+  'XX.X.XX',
+  'X..X..X',
+  'X.XXX.X',
+  'X.XXX.X',
+  '.XXXXX.',
+];
+
 function makeIcon(
   shape: string[],
   color: string,
@@ -53,7 +64,7 @@ function makeIcon(
   return c.toDataURL();
 }
 
-function buildIcons(): { heart: IconSet; food: IconSet } {
+function buildIcons(): { heart: IconSet; food: IconSet; armor: IconSet } {
   return {
     heart: [
       makeIcon(HEART_SHAPE, '#e52521', null, 'full'),
@@ -65,6 +76,11 @@ function buildIcons(): { heart: IconSet; food: IconSet } {
       makeIcon(FOOD_SHAPE, '#b5651d', '#e8e0d0', 'half'),
       makeIcon(FOOD_SHAPE, '#b5651d', '#e8e0d0', 'empty'),
     ],
+    armor: [
+      makeIcon(ARMOR_SHAPE, '#b8b8c0', null, 'full'),
+      makeIcon(ARMOR_SHAPE, '#b8b8c0', null, 'half'),
+      makeIcon(ARMOR_SHAPE, '#b8b8c0', null, 'empty'),
+    ],
   };
 }
 
@@ -73,15 +89,18 @@ export class Hud {
   private pauseHintEl = document.getElementById('pause-menu')!;
   private heartsEl = document.getElementById('hearts')!;
   private hungerEl = document.getElementById('hunger')!;
+  private armorEl = document.getElementById('armor')!;
   private hurtEl = document.getElementById('hurt-overlay')!;
   private nameTimer = 0;
   private hurtTimer = 0;
   private readonly icons = buildIcons();
   private readonly heartSlots: HTMLSpanElement[] = [];
   private readonly foodSlots: HTMLSpanElement[] = [];
+  private readonly armorSlots: HTMLSpanElement[] = [];
   private vitalsVisible = false;
   private lastHp = -1;
   private lastHunger = -1;
+  private lastArmor = -1;
 
   constructor() {
     for (let i = 0; i < 10; i++) {
@@ -93,6 +112,10 @@ export class Hud {
       f.className = 'vital-icon';
       this.hungerEl.appendChild(f);
       this.foodSlots.push(f);
+      const a = document.createElement('span');
+      a.className = 'vital-icon';
+      this.armorEl.appendChild(a);
+      this.armorSlots.push(a);
     }
   }
 
@@ -117,10 +140,13 @@ export class Hud {
       this.vitalsVisible = visible;
       this.heartsEl.classList.toggle('hidden', !visible);
       this.hungerEl.classList.toggle('hidden', !visible);
+      this.armorEl.classList.toggle('hidden', !visible);
       this.lastHp = -1;
       this.lastHunger = -1;
+      this.lastArmor = -1;
       for (const s of this.heartSlots) delete s.dataset.s;
       for (const s of this.foodSlots) delete s.dataset.s;
+      for (const s of this.armorSlots) delete s.dataset.s;
     }
     if (!visible) return;
     if (hp !== this.lastHp) {
@@ -131,6 +157,15 @@ export class Hud {
       this.lastHunger = hunger;
       this.renderRow(this.foodSlots, this.icons.food, hunger);
     }
+  }
+
+  /** 护甲条（0~20，与心同刻度）；仅在变化时重绘。生存且 >0 才显示内容 */
+  setArmor(armor: number): void {
+    if (!this.vitalsVisible) return;
+    if (armor === this.lastArmor) return;
+    this.lastArmor = armor;
+    this.renderRow(this.armorSlots, this.icons.armor, armor);
+    this.armorEl.style.opacity = armor > 0 ? '1' : '0';
   }
 
   /** 受伤全屏红闪 */

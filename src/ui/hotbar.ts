@@ -2,6 +2,7 @@ import type { BlockDef } from '../core/model-loader';
 import { TILE_SIZE, ATLAS_COLS } from '../core/atlas';
 import type { FoodDef } from '../item/foods';
 import type { ToolDef } from '../item/tools';
+import type { EnchMap } from '../item/enchant';
 
 // ============================================================
 // 快捷栏：9 格 DOM，槽位可为 方块堆叠 / 食物堆叠 / 工具 / 空
@@ -25,6 +26,8 @@ export interface ToolStack {
   count: number;
   /** 剩余耐久；undefined 表示满耐久（maxDurability=0 的材料无此概念） */
   dur?: number;
+  /** 附魔表（附魔id→等级）；undefined 表示无附魔 */
+  ench?: EnchMap;
 }
 
 export interface HotSlot {
@@ -33,11 +36,11 @@ export interface HotSlot {
   tool?: ToolStack | null;
 }
 
-/** 存档用紧凑槽位：{ b: 方块id } / { f: 食物id } / { t: 工具id, d?: 耐久 }，n 为数量 */
+/** 存档用紧凑槽位：{ b: 方块id } / { f: 食物id } / { t: 工具id, d?: 耐久, e?: 附魔 }，n 为数量 */
 export type SavedHotSlot =
   | { b: number; n: number }
   | { f: string; n: number }
-  | { t: string; n: number; d?: number };
+  | { t: string; n: number; d?: number; e?: EnchMap };
 
 const STACK_MAX = 64;
 
@@ -105,10 +108,18 @@ export function drawBlockIcon(
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
-/** 工具图标 + MC 风格耐久条（满耐久/无耐久工具不画条） */
+/** 工具图标 + MC 风格耐久条（满耐久/无耐久工具不画条）；附魔物品加紫色光晕 */
 export function drawToolIcon(canvas: HTMLCanvasElement, ts: ToolStack): void {
   const ctx = canvas.getContext('2d')!;
   ctx.drawImage(ts.def.sprite, 0, 0, 16, 16, 4, 4, 36, 36);
+  if (ts.ench && Object.keys(ts.ench).length > 0) {
+    // 附魔光晕：紫色描边 + 高光（MC 附魔物品紫色流光简化）
+    ctx.strokeStyle = 'rgba(180,80,255,0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(4, 4, 36, 36);
+    ctx.fillStyle = 'rgba(200,120,255,0.18)';
+    ctx.fillRect(4, 4, 36, 36);
+  }
   if (ts.def.maxDurability <= 0) return;
   const dur = ts.dur ?? ts.def.maxDurability;
   if (dur >= ts.def.maxDurability) return;
@@ -252,7 +263,7 @@ export class Hotbar {
   }
 
   /** 拾取工具/材料：可堆叠的（木棍）优先叠同类，工具占整格；无空位返回 false */
-  addTool(def: ToolDef, dur?: number): boolean {
+  addTool(def: ToolDef, dur?: number, ench?: EnchMap): boolean {
     if (def.stackable) {
       for (let i = 0; i < 9; i++) {
         const s = this.items[i];
@@ -265,7 +276,7 @@ export class Hotbar {
     }
     const free = this.firstFree();
     if (free < 0) return false;
-    this.items[free].tool = { def, count: 1, dur };
+    this.items[free].tool = { def, count: 1, dur, ench };
     this.renderSlot(free);
     if (free === this.selected) this.onSelect(this.items[free], free);
     return true;
@@ -319,6 +330,7 @@ export class Hotbar {
       if (s.tool) {
         const out: SavedHotSlot = { t: s.tool.def.id, n: s.tool.count };
         if (s.tool.dur !== undefined) out.d = s.tool.dur;
+        if (s.tool.ench && Object.keys(s.tool.ench).length > 0) out.e = s.tool.ench;
         return out;
       }
       return null;
@@ -347,7 +359,7 @@ export class Hotbar {
           slot = {
             block: null,
             food: null,
-            tool: { def: td, count: Math.max(1, s.n | 0), dur: s.d },
+            tool: { def: td, count: Math.max(1, s.n | 0), dur: s.d, ench: s.e },
           };
       }
       this.items[i] = slot;
@@ -370,6 +382,7 @@ export function serializeSlot(s: HotSlot): SavedHotSlot | null {
   if (s.tool) {
     const out: SavedHotSlot = { t: s.tool.def.id, n: s.tool.count };
     if (s.tool.dur !== undefined) out.d = s.tool.dur;
+    if (s.tool.ench && Object.keys(s.tool.ench).length > 0) out.e = s.tool.ench;
     return out;
   }
   return null;
@@ -392,7 +405,7 @@ export function resolveSlot(
     if (fd) return { block: null, food: { def: fd, count: Math.max(1, saved.n | 0) }, tool: null };
   } else {
     const td = resolveTool(saved.t);
-    if (td) return { block: null, food: null, tool: { def: td, count: Math.max(1, saved.n | 0), dur: saved.d } };
+    if (td) return { block: null, food: null, tool: { def: td, count: Math.max(1, saved.n | 0), dur: saved.d, ench: saved.e } };
   }
   return empty;
 }

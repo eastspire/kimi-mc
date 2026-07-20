@@ -27,10 +27,11 @@ export interface PlayerSave {
 export type GameMode = 'creative' | 'survival';
 
 /** 快捷栏存档槽位：{ b: 方块id } / { f: 食物id } / { t: 工具id, d?: 耐久 }，n 为数量 */
+/** 快捷栏存档槽位：{ b: 方块id } / { f: 食物id } / { t: 工具id, d?: 耐久, e?: 附魔 }，n 为数量 */
 export type SavedHotSlot =
   | { b: number; n: number }
   | { f: string; n: number }
-  | { t: string; n: number; d?: number };
+  | { t: string; n: number; d?: number; e?: Record<string, number> };
 
 export interface SaveMeta {
   version: number;
@@ -46,6 +47,8 @@ export interface SaveMeta {
   hotbar?: (SavedHotSlot | null)[];
   /** 生存模式背包主栏 27 格 */
   inv?: (SavedHotSlot | null)[];
+  /** 生存模式盔甲栏 4 格（头/胸/腿/靴） */
+  armor?: (SavedHotSlot | null)[];
   /** 世界中的熔炉状态（位置+内容+燃烧/烧炼进度） */
   furnaces?: {
     p: [number, number, number];

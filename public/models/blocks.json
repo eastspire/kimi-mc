@@ -542,6 +542,16 @@
       "solid": true,
       "renderLayer": "solid",
       "hardness": 2.0
+    },
+    "enchanting_table": {
+      "id": 60,
+      "display": "附魔台",
+      "model": "block/cube_top",
+      "textures": { "top": "enchanting_top", "side": "enchanting_side", "bottom": "obsidian" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 5.0,
+      "luminance": 0
     }
   }
 }

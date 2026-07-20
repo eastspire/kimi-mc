@@ -1,5 +1,6 @@
 import type { BlockRegistry } from '../core/block-registry';
 import { toolById } from '../item/tools';
+import { armorById } from '../item/armor';
 import { matchRecipe } from '../item/recipes';
 import { FOODS } from '../item/foods';
 import {
@@ -155,7 +156,7 @@ export class CraftingTable {
         return { block: { def, count: out.count }, food: null, tool: null };
     }
     if (out.tool) {
-      const td = toolById(out.tool);
+      const td = toolById(out.tool) ?? armorById(out.tool);
       if (td)
         return { block: null, food: null, tool: { def: td, count: out.count } };
     }

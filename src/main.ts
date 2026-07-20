@@ -42,6 +42,16 @@ import { DropManager } from './item/drops';
 import { XpManager } from './item/xp';
 import { FOODS } from './item/foods';
 import type { HotSlot } from './ui/hotbar';
+import { EnchantUI } from './ui/enchant-ui';
+import { armorById, armorReduction } from './item/armor';
+import {
+  efficiencyMult,
+  sharpnessBonus,
+  protectionBonus,
+  unbreakingKeep,
+  fortuneMult,
+} from './item/enchant';
+import type { ToolStack } from './ui/hotbar';
 
 // ============================================================
 // 主入口：加载模型 → 主菜单（种子/存档）→ 生成世界 → 游戏主循环
@@ -396,6 +406,35 @@ function startGame(
   // ---- 生存背包（E 开关）：27 主栏 + 2×2 合成，光标拿放 ----
   // 主栏数组与合成台/熔炉共享，三个界面数据实时一致
   const invMain: HotSlot[] = Array.from({ length: 27 }, emptyHotSlot);
+
+  // ---- 盔甲栏：4 格（头盔/胸甲/护腿/靴子），存 ToolStack（ArmorDef） ----
+  const armorSlots: (ToolStack | null)[] = [null, null, null, null];
+  /** 当前总护甲点 + 总保护附魔等级 → 减伤比例 */
+  const armorStats = (): { reduction: number; points: number } => {
+    let pts = 0;
+    let prot = 0;
+    for (const s of armorSlots) {
+      if (!s) continue;
+      const ad = armorById(s.def.id);
+      if (ad) pts += ad.armor;
+      if (s.ench?.protection) prot += s.ench.protection;
+    }
+    const reduction = Math.min(0.8, armorReduction(pts) + protectionBonus(prot));
+    return { reduction, points: pts };
+  };
+  /** 受伤时随机损耗一件已穿盔甲 1 点耐久（含耐久附魔减免） */
+  const damageArmor = (): void => {
+    const worn = armorSlots
+      .map((s, i) => ({ s, i }))
+      .filter((x): x is { s: ToolStack; i: number } => x.s !== null);
+    if (worn.length === 0) return;
+    const pick = worn[Math.floor(Math.random() * worn.length)];
+    const keep = unbreakingKeep(pick.s.ench?.unbreaking ?? 0);
+    if (Math.random() < keep) return;
+    const dur = (pick.s.dur ?? pick.s.def.maxDurability) - 1;
+    if (dur <= 0) armorSlots[pick.i] = null;
+    else armorSlots[pick.i] = { ...pick.s, dur };
+  };
   /** 把槽位内容掉落在指定位置（背包退不下/熔炉破坏散出共用） */
   const dropSlotAt = (slot: HotSlot, x: number, y: number, z: number): void => {
     if (slot.block)
@@ -415,6 +454,7 @@ function startGame(
     hotbar,
     invCallbacks,
     invMain,
+    armorSlots,
   );
   // ---- 合成台 3×3（右键工作台方块打开，共享主栏/快捷栏） ----
   const craftingTable = new CraftingTable(
@@ -450,6 +490,18 @@ function startGame(
     return td ? { block: null, food: null, tool: { def: td, count: 1 } } : null;
   };
   const furnaceUI = new FurnaceUI(atlas.canvas, hotbar, invMain, invCallbacks);
+
+  // ---- 附魔台：右键打开 UI，消耗经验+青金石给装备附魔 ----
+  const enchantUI = new EnchantUI(atlas.canvas, hotbar, invMain, {
+    ...invCallbacks,
+    getXpLevel: () => xpLevel,
+    spendXp: (levels) => {
+      spendXpLevels(levels);
+    },
+    onEnchanted: () => {
+      sfx.playXp();
+    },
+  });
   // 读档：恢复熔炉状态
   if (save?.meta.furnaces) {
     for (const sf of save.meta.furnaces) {
@@ -466,6 +518,9 @@ function startGame(
   // 生存读档：恢复背包主栏
   if (gameMode === 'survival' && save?.meta.inv)
     survivalInv.restoreMain(save.meta.inv);
+  // 生存读档：恢复盔甲栏
+  if (gameMode === 'survival' && save?.meta.armor)
+    survivalInv.restoreArmor(save.meta.armor);
 
   // ---- 创造模式物品栏（E 开关，点击放入当前槽位） ----
   const inventory = new Inventory(
@@ -610,12 +665,26 @@ function startGame(
   };
   hud.setXp(xpLevel, xp / xpToNext(xpLevel), gameMode === 'survival');
 
+  /** 附魔消耗整级经验：先扣当前进度，不足则降级并补满上一级进度 */
+  const spendXpLevels = (levels: number): void => {
+    for (let i = 0; i < levels; i++) {
+      if (xpLevel <= 0) break;
+      xpLevel--;
+      xp = 0; // MC：附魔按整级扣，清掉当前级进度
+    }
+    hud.setXp(xpLevel, xp / xpToNext(xpLevel), gameMode === 'survival');
+  };
+
   // ---- 生存：受伤 / 死亡 / 重生 ----
   const deathScreen = document.getElementById('death-screen')!;
   const hurtPlayer = (dmg: number, kbx = 0, kbz = 0): void => {
     if (gameMode !== 'survival' || dead || hurtInvuln > 0) return;
     hurtInvuln = 0.5;
-    hp = Math.max(0, hp - dmg);
+    // 护甲减伤（MC：护甲点 + 保护附魔，上限 80%），并损耗盔甲耐久
+    const { reduction } = armorStats();
+    const final = Math.max(1, Math.round(dmg * (1 - reduction)));
+    if (reduction > 0) damageArmor();
+    hp = Math.max(0, hp - final);
     hud.hurtFlash();
     sfx.playHurt();
     if (kbx !== 0 || kbz !== 0) {
@@ -761,6 +830,7 @@ function startGame(
           mode: gameMode,
           hotbar: gameMode === 'survival' ? hotbar.serialize() : undefined,
           inv: gameMode === 'survival' ? survivalInv.serializeMain() : undefined,
+          armor: gameMode === 'survival' ? survivalInv.serializeArmor() : undefined,
           furnaces: [...furnaces.values()].map(serializeFurnace),
           spawnPoint: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
         },
@@ -942,7 +1012,9 @@ function startGame(
       Math.round(1 + charge * 8),
     );
     if (gameMode === 'survival') {
-      consumeArrow();
+      // 无限附魔：不消耗箭（仍需至少 1 支才可蓄力，MC 一致）
+      const hasInfinity = (hotbar.current.tool?.ench?.infinity ?? 0) > 0;
+      if (!hasInfinity) consumeArrow();
       damageHeldTool(1);
     }
     sfx.playShoot();
@@ -969,12 +1041,18 @@ function startGame(
     if (gameMode !== 'survival') return;
     const s = hotbar.current;
     if (!s.tool || s.tool.def.maxDurability <= 0) return;
-    const dur = (s.tool.dur ?? s.tool.def.maxDurability) - n;
-    if (dur <= 0) {
-      s.tool = null;
-      sfx.playBreak();
-    } else {
-      s.tool.dur = dur;
+    // 耐久附魔：每级 1/(level+1) 概率免除本次损耗（MC）
+    const keep = unbreakingKeep(s.tool.ench?.unbreaking ?? 0);
+    for (let i = 0; i < n; i++) {
+      if (Math.random() < keep) continue;
+      const dur = (s.tool.dur ?? s.tool.def.maxDurability) - 1;
+      if (dur <= 0) {
+        s.tool = null;
+        sfx.playBreak();
+        break;
+      } else {
+        s.tool.dur = dur;
+      }
     }
     hotbar.setSlotAt(hotbar.selected, s);
   }
@@ -988,21 +1066,25 @@ function startGame(
     // 石质矿物需镐达到层级才可采集，否则破坏无掉落（MC 规则）
     if (gameMode === 'survival') {
       const heldTool = hotbar.current.tool?.def ?? null;
+      // 时运附魔：提升矿物掉落数量（煤/钻/青金石/红石/绿宝石）
+      const fortuneLvl = hotbar.current.tool?.ench?.fortune ?? 0;
+      const fmult = fortuneMult(fortuneLvl);
+      const lucky = (base: number): number => Math.max(1, Math.round(base * fmult));
       if (canHarvest(def.name, heldTool)) {
         // 煤矿掉煤、钻石矿掉钻石（MC 一致），其余走方块掉落表
         if (def.name === 'coal_ore') {
-          drops.spawnTool(TOOLS.coal, x + 0.5, y + 0.5, z + 0.5);
+          drops.spawnTool(TOOLS.coal, x + 0.5, y + 0.5, z + 0.5, lucky(1));
         } else if (def.name === 'diamond_ore') {
-          drops.spawnTool(TOOLS.diamond, x + 0.5, y + 0.5, z + 0.5);
+          drops.spawnTool(TOOLS.diamond, x + 0.5, y + 0.5, z + 0.5, lucky(1));
         } else if (def.name === 'lapis_ore') {
           // 青金石掉 4~8 个
           const n = 4 + Math.floor(Math.random() * 5);
-          drops.spawnTool(TOOLS.lapis_lazuli, x + 0.5, y + 0.5, z + 0.5, n);
+          drops.spawnTool(TOOLS.lapis_lazuli, x + 0.5, y + 0.5, z + 0.5, lucky(n));
         } else if (def.name === 'redstone_ore') {
           const n = 4 + Math.floor(Math.random() * 2);
-          drops.spawnTool(TOOLS.redstone, x + 0.5, y + 0.5, z + 0.5, n);
+          drops.spawnTool(TOOLS.redstone, x + 0.5, y + 0.5, z + 0.5, lucky(n));
         } else if (def.name === 'emerald_ore') {
-          drops.spawnTool(TOOLS.emerald, x + 0.5, y + 0.5, z + 0.5);
+          drops.spawnTool(TOOLS.emerald, x + 0.5, y + 0.5, z + 0.5, lucky(1));
         } else if (def.name === 'tall_grass') {
           // 打草概率掉小麦种子（MC ~12.5%）
           if (Math.random() < 0.13)
@@ -1139,7 +1221,8 @@ function startGame(
     // 近战伤害取手持工具 melee（剑 4~7，锹/斧/镐较低，徒手 1）；剑命中 -2 耐久，其他工具 -1
     if (attackHeld && mobPriority && mobHit) {
       const heldTool = hotbar.current.tool?.def ?? null;
-      const melee = heldTool?.melee ?? 1;
+      const sharpLvl = hotbar.current.tool?.ench?.sharpness ?? 0;
+      const melee = (heldTool?.melee ?? 1) + sharpnessBonus(sharpLvl);
       if (mobHit.mob.damage(tmpDir.x, tmpDir.z, melee)) {
         sfx.playHurt();
         damageHeldTool(heldTool?.kind === 'sword' ? 2 : 1);
@@ -1160,9 +1243,11 @@ function startGame(
           breakBlock(currentHit.x, currentHit.y, currentHit.z);
           breakKey = '';
         } else {
-          // 工具加成：对应工具类型才有速度倍率（MC：木 2×、石 4×）
+          // 工具加成：对应工具类型才有速度倍率（MC：木 2×、石 4×）；效率附魔再加速
           const heldTool = hotbar.current.tool?.def ?? null;
-          const mult = gameMode === 'survival' ? miningSpeed(def.name, heldTool) : 1;
+          const effLvl = hotbar.current.tool?.ench?.efficiency ?? 0;
+          const base = gameMode === 'survival' ? miningSpeed(def.name, heldTool) : 1;
+          const mult = base * efficiencyMult(effLvl);
           breakProgress += (dt * mult) / (def.hardness * 1.5);
           if (breakProgress >= 1) {
             breakBlock(currentHit.x, currentHit.y, currentHit.z);
@@ -1197,6 +1282,9 @@ function startGame(
         useCooldown = 0.3;
       } else if (hitDef && hitDef.name === 'furnace') {
         furnaceUI.open(getFurnace(currentHit!.x, currentHit!.y, currentHit!.z));
+        useCooldown = 0.3;
+      } else if (hitDef && hitDef.name === 'enchanting_table') {
+        enchantUI.open();
         useCooldown = 0.3;
       } else if (hitDef && hitDef.name === 'bed') {
         trySleep(currentHit!.x, currentHit!.y, currentHit!.z);
@@ -1402,6 +1490,7 @@ function startGame(
         hurtInvuln = Math.max(0, hurtInvuln - dt);
       }
       hud.setVitals(hp, hunger, gameMode === 'survival');
+      hud.setArmor(armorStats().points);
 
       updateInteraction(dt);
       hand.update(dt, Math.hypot(body.vx, body.vz), body.onGround, attackHeld);

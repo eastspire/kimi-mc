@@ -3,7 +3,12 @@ import type { BlockDef } from '../core/model-loader';
 import type { World } from '../world/world';
 import { chunkKey } from '../world/world';
 import type { WorldGen, Dimension } from '../world/worldgen';
-import type { AtlasResult } from '../core/atlas';
+import {
+  ATLAS_COLS,
+  ATLAS_ROWS,
+  TILE_SIZE,
+  type AtlasResult,
+} from '../core/atlas';
 import type { JobOut, PackedGeometry } from './mesher-worker';
 
 // ============================================================
@@ -34,15 +39,18 @@ interface FlightInfo {
 }
 
 /** 注入图集 UV 重映射 shader：uv 为“格内局部坐标”，aTile 为图集格号；
- *  aLight 为逐顶点方块光，与日光 uDay 取最大（MC 光曲线近似：0 级保底 0.08） */
+ *  aLight 为逐顶点方块光，与日光 uDay 取最大（MC 光曲线近似：0 级保底 0.08）
+ *  图集尺寸由 ATLAS_COLS/ROWS/TILE_SIZE 常量注入，扩容时无需改这里。 */
+const ATLAS_W = ATLAS_COLS * TILE_SIZE;
+const ATLAS_H = ATLAS_ROWS * TILE_SIZE;
 const MAP_FRAG = /* glsl */ `
 #ifdef USE_MAP
-  float tileCol = mod(vTile, 8.0);
-  float tileRow = floor(vTile * 0.125);
+  float tileCol = mod(vTile, ${ATLAS_COLS.toFixed(1)});
+  float tileRow = floor(vTile / ${ATLAS_COLS.toFixed(1)});
   vec2 fuv = fract(vMapUv);
   vec2 atlasUv = vec2(
-    (tileCol * 16.0 + 0.5 + fuv.x * 15.0) / 128.0,
-    ((tileRow + 1.0) * 16.0 - 0.5 - fuv.y * 15.0) / 192.0
+    (tileCol * ${TILE_SIZE.toFixed(1)} + 0.5 + fuv.x * ${(TILE_SIZE - 1).toFixed(1)}) / ${ATLAS_W.toFixed(1)},
+    ((tileRow + 1.0) * ${TILE_SIZE.toFixed(1)} - 0.5 - fuv.y * ${(TILE_SIZE - 1).toFixed(1)}) / ${ATLAS_H.toFixed(1)}
   );
   diffuseColor *= texture2D(map, atlasUv);
 #endif

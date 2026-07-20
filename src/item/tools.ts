@@ -368,6 +368,18 @@ export const TOOLS: Record<string, ToolDef> = {
     c.fillStyle = '#c8c8c0';
     c.fillRect(4, 11, 8, 1); c.fillRect(10, 6, 1, 1);
   }),
+  // ---- 末影珍珠（末影人掉落，投掷瞬移/合成用） ----
+  ender_pearl: makeTool('ender_pearl', '末影珍珠', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#1a6a5a';
+    c.fillRect(5, 5, 6, 6);
+    c.fillRect(4, 6, 8, 4);
+    c.fillStyle = '#2a9a7a';
+    c.fillRect(6, 6, 3, 3);
+    c.fillStyle = '#0e3a34';
+    c.fillRect(6, 9, 4, 1);
+    c.fillStyle = '#7fe8d8';
+    c.fillRect(6, 6, 1, 1);
+  }),
   // ---- 小麦（收获物，合成面包） ----
   wheat_item: makeTool('wheat_item', '小麦', 1, 'material', 0, true, 0, (c) => {
     c.fillStyle = '#c8a83a';

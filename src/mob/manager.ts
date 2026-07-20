@@ -139,14 +139,21 @@ export class MobManager {
     const grassId = this.world.reg.id('grass_block');
     const leavesId = this.world.reg.id('oak_leaves');
 
-    // 自上而下找第一个实体面：要求上方 2 格净空
+    // 自上而下找第一个实体面：要求上方足够净空（按生物高度）
+    const needClear = kind === 'enderman' ? 3 : 2;
     for (let y = 110; y > 40; y--) {
       if (!this.world.isSolid(bx, y, bz)) continue;
-      if (this.world.isSolid(bx, y + 1, bz) || this.world.isSolid(bx, y + 2, bz))
-        return; // 顶面被堵（树上/悬空物下），本轮放弃
+      let blocked = false;
+      for (let c = 1; c <= needClear; c++) {
+        if (this.world.isSolid(bx, y + c, bz)) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) return; // 顶面被堵（树上/悬空物下），本轮放弃
       const ground = this.world.getBlock(bx, y, bz);
       if (this.world.reg.isWater(ground) || ground === leavesId) return;
-      if (!HOSTILE.has(kind) && ground !== grassId) return;
+      if (!HOSTILE.has(kind) && kind !== 'enderman' && ground !== grassId) return;
       this.spawn(kind, bx + 0.5, y + 1.01, bz + 0.5);
       return;
     }
@@ -168,9 +175,25 @@ export class MobManager {
   ): void {
     setMobBrightness(daylight);
 
-    // 追击目标分配（敌对生物）：玩家 24 格内；蜘蛛白天中立（仅夜晚/黑暗处追击，MC）
+    // 追击目标分配（敌对生物）：玩家 24 格内；蜘蛛白天中立；末影人仅激怒时追击
     const nightHostile = daylight < 0.55;
     for (const m of this.mobs) {
+      if (m.kind === 'enderman') {
+        // 末影人：未被激怒不追击；激怒后 24 格内锁玩家
+        if (m.dying || !m.provoked) {
+          m.hasTarget = false;
+          continue;
+        }
+        const dx = px - m.x;
+        const dz = pz - m.z;
+        m.hasTarget = dx * dx + dz * dz < CHASE_RANGE * CHASE_RANGE;
+        if (m.hasTarget) {
+          m.targetX = px;
+          m.targetY = py;
+          m.targetZ = pz;
+        }
+        continue;
+      }
       if (!HOSTILE.has(m.kind) || m.dying) {
         m.hasTarget = false;
         continue;
@@ -261,7 +284,12 @@ export class MobManager {
       this.spawnTimer = 4 + Math.random() * 4;
       const passive = daylight > 0.55;
       const PASSIVES: MobKind[] = ['pig', 'sheep', 'cow', 'chicken'];
-      const HOSTILES: MobKind[] = ['zombie', 'skeleton', 'creeper', 'spider'];
+      // 夜晚敌对池：末影人权重较低（MC 较稀有）
+      const HOSTILES: MobKind[] = [
+        'zombie', 'skeleton', 'creeper', 'spider',
+        'zombie', 'skeleton', 'creeper', 'spider',
+        'enderman',
+      ];
       const pool = passive ? PASSIVES : HOSTILES;
       const kind: MobKind = pool[Math.floor(Math.random() * pool.length)];
       const cap = passive ? MAX_PASSIVE : MAX_ZOMBIES;

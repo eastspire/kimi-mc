@@ -269,6 +269,12 @@ function startGame(
         if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
         return;
       }
+      if (kind === 'enderman') {
+        // 末影人掉 0~1 末影珍珠（MC）+ 5 经验
+        if (Math.random() < 0.5) drops.spawnTool(TOOLS.ender_pearl, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
+        return;
+      }
       const n =
         kind === 'pig'
           ? 1 + Math.floor(Math.random() * 3)
@@ -575,6 +581,7 @@ function startGame(
   let nextCrunch = 0.4;
   let growTimer = 0; // 作物随机 tick 节流
   let bowCharge = 0; // 弓蓄力进度（秒，>0 表示正在拉弓）
+  let stareTimer = 0; // 末影人注视计时（>0.25s 激怒）
 
   const controls = new Controls(renderer.domElement, {
     onToggleFly: () => {
@@ -1205,6 +1212,19 @@ function startGame(
     );
     const mobPriority =
       mobHit !== null && (!currentHit || mobHit.dist < currentHit.dist);
+
+    // 末影人注视激怒（MC）：准星远距离锁定其头部约 0.25s 即激怒
+    const stareHit = mobManager.raycastMob(
+      eye.x, eye.y, eye.z,
+      tmpDir.x, tmpDir.y, tmpDir.z,
+      32,
+    );
+    if (stareHit && stareHit.mob.kind === 'enderman' && !stareHit.mob.dying) {
+      stareTimer += dt;
+      if (stareTimer > 0.25) stareHit.mob.provoked = true;
+    } else {
+      stareTimer = 0;
+    }
 
     if (currentHit && !mobPriority) {
       highlight.visible = true;

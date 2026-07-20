@@ -8,6 +8,7 @@ import {
   buildSkeletonModel,
   buildCreeperModel,
   buildSpiderModel,
+  buildEndermanModel,
   setMobHurt,
   type MobModel,
 } from './model';
@@ -29,7 +30,8 @@ export type MobKind =
   | 'chicken'
   | 'skeleton'
   | 'creeper'
-  | 'spider';
+  | 'spider'
+  | 'enderman';
 
 const GRAVITY = 27;
 const TERMINAL_VEL = -52;
@@ -57,6 +59,7 @@ const DIMS: Record<MobKind, MobDims> = {
   skeleton: { half: 0.3, height: 1.95, speed: 1.4, hp: 20 },
   creeper: { half: 0.3, height: 1.7, speed: 1.3, hp: 20 },
   spider: { half: 0.7, height: 0.9, speed: 1.6, hp: 16 },
+  enderman: { half: 0.3, height: 2.9, speed: 1.5, hp: 40 },
 };
 
 /** 腿摆动相位偏移：四足对角同相，双足左右交替 */
@@ -69,6 +72,7 @@ const LEG_PHASE: Record<MobKind, number[]> = {
   skeleton: [0, Math.PI],
   creeper: [0, Math.PI, Math.PI, 0],
   spider: [0, Math.PI, Math.PI, 0, Math.PI, 0, 0, Math.PI],
+  enderman: [0, Math.PI],
 };
 
 const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
@@ -80,6 +84,7 @@ const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
   skeleton: buildSkeletonModel,
   creeper: buildCreeperModel,
   spider: buildSpiderModel,
+  enderman: buildEndermanModel,
 };
 
 /** 敌对生物（追击玩家）；骷髅/僵尸怕日晒，苦力怕/蜘蛛不怕 */
@@ -152,6 +157,8 @@ export class Mob {
   private attackTimer = 0;
   private attackAnim = 0;
   private deathTimer = 0;
+  /** 末影人瞬移冷却（追击/受击逃逸共用） */
+  private teleportTimer = 0;
 
   constructor(
     private world: World,
@@ -180,6 +187,9 @@ export class Mob {
     return this.dying && this.deathTimer >= DEATH_TIME + 0.15;
   }
 
+  /** 末影人被激怒（注视/受击触发，manager 维护） */
+  provoked = false;
+
   /** 受击：伤害 + 击退 + 红闪 + 无敌帧；返回是否真的造成了伤害 */
   damage(dirX: number, dirZ: number, dmg: number): boolean {
     if (this.dying || this.invuln > 0) return false;
@@ -194,6 +204,10 @@ export class Mob {
     if (this.hp <= 0) {
       this.dying = true;
       this.deathTimer = 0;
+    } else if (this.kind === 'enderman') {
+      // 末影人受击：激怒并概率瞬移逃逸（MC：被打后常瞬走再绕回）
+      this.provoked = true;
+      if (Math.random() < 0.5) this.teleportNear(this.x, this.y, this.z, 8);
     } else if (!HOSTILE.has(this.kind)) {
       // 被动生物恐慌逃窜：朝击退反方向狂奔 2s（敌对生物不恐慌，MC 一致）
       this.panicTimer = 2;
@@ -260,6 +274,26 @@ export class Mob {
     return hit;
   }
 
+  /** 末影人瞬移：在 (cx,cy,cz) 附近随机找一处可站立位置，瞬移过去（MC） */
+  private teleportNear(cx: number, cy: number, cz: number, radius: number): void {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const nx = cx + (Math.random() - 0.5) * 2 * radius;
+      const nz = cz + (Math.random() - 0.5) * 2 * radius;
+      const bx = Math.floor(nx);
+      const bz = Math.floor(nz);
+      // 自上而下找可站立面（脚下方块实体、头顶净空）
+      for (let by = Math.min(120, Math.floor(cy) + 4); by > Math.floor(cy) - 6; by--) {
+        if (!this.solidAt(bx, by, bz)) continue;
+        if (this.boxCollides(nx, by + 1.01, nz)) break;
+        this.x = nx;
+        this.y = by + 1.01;
+        this.z = nz;
+        this.vy = 0;
+        return;
+      }
+    }
+  }
+
   /** 物理 + AI 步进 */
   step(dt: number): void {
     if (this.dying) {
@@ -278,7 +312,7 @@ export class Mob {
       const d = Math.hypot(dx, dz);
       const dy = Math.abs(this.targetY - this.y);
       if (d < CHASE_RANGE && dy < 10) {
-        if (this.kind === 'zombie' || this.kind === 'spider') {
+        if (this.kind === 'zombie' || this.kind === 'spider' || this.kind === 'enderman') {
           chasing = true;
           this.yaw = Math.atan2(-dx, -dz);
           if (d < ATTACK_RANGE + this.half && dy < 2.2 && this.attackTimer <= 0) {
@@ -289,6 +323,14 @@ export class Mob {
           // 蜘蛛跃击：追击接近时概率前扑跳起（MC 蜘蛛特性）
           if (this.kind === 'spider' && this.onGround && d < 6 && d > 2 && Math.random() < 0.02)
             this.vy = JUMP_VEL * 1.1;
+          // 末影人瞬移：追击时周期性瞬移到玩家附近（MC 特性）
+          if (this.kind === 'enderman') {
+            this.teleportTimer -= dt;
+            if (this.teleportTimer <= 0) {
+              this.teleportTimer = 2 + Math.random() * 3;
+              this.teleportNear(this.targetX, this.targetY, this.targetZ, 4);
+            }
+          }
         } else if (this.kind === 'skeleton') {
           this.yaw = Math.atan2(-dx, -dz);
           if (d > 10) chasing = true; // 接近到射程停住（MC 站桩输出）

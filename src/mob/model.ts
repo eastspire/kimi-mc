@@ -294,6 +294,29 @@ function paintSpider(ctx: CanvasRenderingContext2D): void {
   f(0, 16, 16, 16, dark);
 }
 
+/** 末影人：通体近黑 + 紫色眼睛（MC 标志性） */
+function paintEnderman(ctx: CanvasRenderingContext2D): void {
+  const f = (x: number, y: number, w: number, h: number, c: string): void => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const body = '#161616';
+  const dark = '#0e0e0e';
+  const light = '#1f1f1f';
+  // 头部 (0,0)-(32,16)
+  f(0, 0, 32, 16, body);
+  // 紫色发光眼（头正面 (8,8)-(16,16)）
+  f(9, 11, 2, 1, '#c04ee8');
+  f(13, 11, 2, 1, '#c04ee8');
+  f(9, 12, 2, 1, '#7a1fa8');
+  f(13, 12, 2, 1, '#7a1fa8');
+  // 躯干/四肢：近黑带轻微色差
+  f(16, 16, 24, 16, body);
+  f(40, 16, 16, 16, dark);
+  f(0, 16, 16, 16, dark);
+  for (let i = 0; i < 8; i++) f(16 + ((i * 7) % 24), 16 + ((i * 5) % 16), 1, 1, light);
+}
+
 function paintZombie(ctx: CanvasRenderingContext2D): void {
   const f = (x: number, y: number, w: number, h: number, c: string): void => {
     ctx.fillStyle = c;
@@ -352,6 +375,7 @@ let chickenAssets: MobAssets | null = null;
 let skeletonAssets: MobAssets | null = null;
 let creeperAssets: MobAssets | null = null;
 let spiderAssets: MobAssets | null = null;
+let endermanAssets: MobAssets | null = null;
 
 function makeAssets(paint: (ctx: CanvasRenderingContext2D) => void, geo: MobAssets['geo']): MobAssets {
   const tex = makeTexture(paint);
@@ -453,6 +477,19 @@ function getSpiderAssets(): MobAssets {
     });
   }
   return spiderAssets;
+}
+
+function getEndermanAssets(): MobAssets {
+  if (!endermanAssets) {
+    // 3 格高（48px）：躯干 12px，腿 30px，臂 30px（细长）
+    endermanAssets = makeAssets(paintEnderman, {
+      body: mcBox(8, 12, 4, 16, 16),
+      head: mcBox(8, 8, 8, 0, 0),
+      arm: mcBox(3, 30, 3, 40, 16),
+      leg: mcBox(3, 30, 3, 0, 16),
+    });
+  }
+  return endermanAssets;
 }
 
 export function buildPigModel(): MobModel {
@@ -793,6 +830,52 @@ export function buildSpiderModel(): MobModel {
   return { group, head, legs, arms: [], meshes, material: a.material, hurtMaterial: a.hurt };
 }
 
+/** 末影人模型：3 格高细长腿臂，激怒时手臂前伸（armBase 0，攻击抬起） */
+export function buildEndermanModel(): MobModel {
+  const a = getEndermanAssets();
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+  const add = (m: THREE.Mesh): THREE.Mesh => {
+    meshes.push(m);
+    return m;
+  };
+
+  // 腿占 30px（1.875 格），躯干在其上
+  const body = add(new THREE.Mesh(a.geo.body, a.material));
+  body.position.y = 36 * PX; // 躯干中心：腿 30 + 半身高 6
+  group.add(body);
+
+  const head = new THREE.Group();
+  head.position.set(0, 44 * PX, 0);
+  const headMesh = add(new THREE.Mesh(a.geo.head, a.material));
+  headMesh.position.y = 4 * PX;
+  head.add(headMesh);
+  group.add(head);
+
+  const arms: THREE.Group[] = [];
+  for (const ax of [-5.5, 5.5]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(ax * PX, 40 * PX, 0);
+    const mesh = add(new THREE.Mesh(a.geo.arm, a.material));
+    mesh.position.y = -13 * PX; // 长臂下垂
+    pivot.add(mesh);
+    group.add(pivot);
+    arms.push(pivot);
+  }
+
+  const legs: THREE.Group[] = [];
+  for (const lx of [-2, 2]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(lx * PX, 30 * PX, 0);
+    const mesh = add(new THREE.Mesh(a.geo.leg, a.material));
+    mesh.position.y = -15 * PX; // 长腿到地
+    pivot.add(mesh);
+    group.add(pivot);
+    legs.push(pivot);
+  }
+  return { group, head, legs, arms, armBase: 0, meshes, material: a.material, hurtMaterial: a.hurt };
+}
+
 /** 昼夜亮度同步到生物材质（与天空 daylight 一致，主循环每帧调用） */
 export function setMobBrightness(d: number): void {
   if (pigAssets) pigAssets.material.color.setScalar(d);
@@ -803,4 +886,5 @@ export function setMobBrightness(d: number): void {
   if (skeletonAssets) skeletonAssets.material.color.setScalar(d);
   if (creeperAssets) creeperAssets.material.color.setScalar(d);
   if (spiderAssets) spiderAssets.material.color.setScalar(d);
+  if (endermanAssets) endermanAssets.material.color.setScalar(d);
 }

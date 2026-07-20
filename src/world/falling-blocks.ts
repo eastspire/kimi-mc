@@ -43,6 +43,13 @@ export class FallingBlockManager {
     return this.list.length;
   }
 
+  /** 维度切换时换绑世界并清除空中下落实体（属于旧维度场景） */
+  setWorld(w: World): void {
+    this.world = w;
+    for (const b of this.list) this.scene.remove(b.mesh);
+    this.list.length = 0;
+  }
+
   private geoFor(def: BlockDef): THREE.BufferGeometry | null {
     if (this.geoCache.has(def.id)) return this.geoCache.get(def.id)!;
     const arr = buildBlockGeometry(def);

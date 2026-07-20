@@ -42,6 +42,13 @@ export class XpManager {
     return this.orbs.length;
   }
 
+  /** 维度切换时换绑世界并清除经验球（属于旧维度场景） */
+  setWorld(w: World): void {
+    this.world = w;
+    for (const o of this.orbs) this.scene.remove(o.mesh);
+    this.orbs.length = 0;
+  }
+
   /** 生成总价值为 totalValue 的若干经验球（单球 1~4 点，MC 风格拆分） */
   spawn(totalValue: number, x: number, y: number, z: number): void {
     let v = Math.floor(totalValue);

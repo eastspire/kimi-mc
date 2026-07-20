@@ -65,6 +65,13 @@ export class DropManager {
     return this.drops.length;
   }
 
+  /** 维度切换时换绑世界并清除未拾取掉落物（属于旧维度场景） */
+  setWorld(w: World): void {
+    this.world = w;
+    for (const d of this.drops) this.scene.remove(d.group);
+    this.drops.length = 0;
+  }
+
   private spriteMat(def: { id: string; texture: THREE.Texture }): THREE.MeshBasicMaterial {
     let m = this.foodMats.get(def.id);
     if (!m) {

@@ -50,6 +50,13 @@ export class TntManager {
     return this.list.length;
   }
 
+  /** 维度切换时换绑世界并清除引信中的 TNT（属于旧维度场景） */
+  setWorld(w: World): void {
+    this.world = w;
+    for (const t of this.list) this.scene.remove(t.mesh);
+    this.list.length = 0;
+  }
+
   /** 在 (x,y,z) 生成点燃的 TNT（fuse 秒，默认 4）；初始小幅上弹（MC） */
   ignite(x: number, y: number, z: number, fuse = FUSE): void {
     const mesh = new THREE.Mesh(geo!, matRed!);

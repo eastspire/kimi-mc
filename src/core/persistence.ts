@@ -61,6 +61,15 @@ export interface SaveMeta {
   }[];
   /** 床设置的重生点；缺省 → 世界出生点 */
   spawnPoint?: { x: number; y: number; z: number };
+  /** 玩家所在维度；缺省 → overworld */
+  dimension?: 'overworld' | 'nether';
+  /** 下界修改过的区块（键 "cx,cz" → RLE 字节，存档外单独携带，避免与主世界键冲突） */
+  netherChunks?: Map<string, Uint8Array>;
+}
+
+/** meta 入库前的线性格式：netherChunks 的 Map 转为可结构化克隆的 [key, RLE][] */
+interface StoredMeta extends Omit<SaveMeta, 'netherChunks'> {
+  netherChunks?: [string, Uint8Array][];
 }
 
 export interface LoadedSave {
@@ -135,11 +144,13 @@ export class Persistence {
   async load(): Promise<LoadedSave | null> {
     if (!this.db) return null;
     const t = this.db.transaction([META_STORE, CHUNK_STORE], 'readonly');
-    const meta = (await req(t.objectStore(META_STORE).get(META_KEY))) as SaveMeta | undefined;
-    if (!meta) return null;
-    const p = meta.player;
+    const stored = (await req(t.objectStore(META_STORE).get(META_KEY))) as
+      | StoredMeta
+      | undefined;
+    if (!stored) return null;
+    const p = stored.player;
     if (
-      typeof meta.seed !== 'number' ||
+      typeof stored.seed !== 'number' ||
       !p ||
       ![p.x, p.y, p.z, p.yaw, p.pitch].every((v) => Number.isFinite(v))
     ) {
@@ -154,6 +165,13 @@ export class Persistence {
       if (!(raw instanceof Uint8Array)) throw new Error('存档区块数据类型错误');
       chunks.set(String(keys[i]), rleDecode(raw));
     }
+    // 下界修改集解压回 Map
+    const meta: SaveMeta = { ...stored, netherChunks: undefined };
+    if (stored.netherChunks) {
+      const nm = new Map<string, Uint8Array>();
+      for (const [k, raw] of stored.netherChunks) nm.set(k, rleDecode(raw));
+      meta.netherChunks = nm;
+    }
     return { meta, chunks };
   }
 
@@ -161,7 +179,14 @@ export class Persistence {
   async save(meta: SaveMeta, chunks: Map<string, Uint8Array>): Promise<void> {
     if (!this.db) return;
     const t = this.db.transaction([META_STORE, CHUNK_STORE], 'readwrite');
-    t.objectStore(META_STORE).put(meta, META_KEY);
+    const stored: StoredMeta = { ...meta, netherChunks: undefined };
+    if (meta.netherChunks) {
+      stored.netherChunks = [...meta.netherChunks].map(([k, v]) => [
+        k,
+        rleEncode(v),
+      ]);
+    }
+    t.objectStore(META_STORE).put(stored, META_KEY);
     const store = t.objectStore(CHUNK_STORE);
     store.clear();
     for (const [key, data] of chunks) {

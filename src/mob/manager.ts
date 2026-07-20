@@ -44,6 +44,13 @@ export class MobManager {
     return this.mobs.length;
   }
 
+  /** 维度切换时换绑世界并清除全部生物（旧维度生物不跨维度；新维度重新刷） */
+  setWorld(w: World): void {
+    this.world = w;
+    for (const m of this.mobs) this.scene.remove(m.model.group);
+    this.mobs.length = 0;
+  }
+
   /** 手动生成一只生物（调试/后续刷怪蛋用） */
   spawn(kind: MobKind, x: number, y: number, z: number): Mob {
     const mob = new Mob(this.world, kind, x, y, z);

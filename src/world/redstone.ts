@@ -57,6 +57,15 @@ export class RedstoneSimulator {
     this.idButton = get('stone_button');
   }
 
+  /** 维度切换时换绑世界并清空电路状态（旧维度电路对新世界无意义） */
+  setWorld(w: World): void {
+    this.world = w;
+    this.pending.clear();
+    this.pulses.clear();
+    this.litTnt.clear();
+    this.acc = 0;
+  }
+
   /** 方块改动时唤醒（applyEdit 调用）：重算该区域 */
   wake(x: number, y: number, z: number): void {
     const k = key(x, y, z);

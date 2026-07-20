@@ -44,6 +44,11 @@ export class PlayerBody {
 
   constructor(private world: World) {}
 
+  /** 维度切换时换绑世界（下界/主世界各一份） */
+  setWorld(w: World): void {
+    this.world = w;
+  }
+
   eyeHeight(): number {
     return this.sneaking && !this.flying ? EYE_HEIGHT_SNEAK : EYE_HEIGHT;
   }

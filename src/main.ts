@@ -4,7 +4,7 @@ import { createAtlas, TILE_INDEX, type AtlasResult } from './core/atlas';
 import { loadBlocks, type BlockDef } from './core/model-loader';
 import { BlockRegistry, AIR } from './core/block-registry';
 import { Persistence, type LoadedSave, type GameMode } from './core/persistence';
-import { WorldGen, SEA_LEVEL, parseSeedInput } from './world/worldgen';
+import { WorldGen, SEA_LEVEL, parseSeedInput, type Dimension } from './world/worldgen';
 import { World, chunkKey } from './world/world';
 import { ChunkManager, RENDER_DIST } from './render/chunk-manager';
 import { Sky, DAY_LENGTH } from './render/sky';
@@ -186,20 +186,57 @@ function startGame(
     hand.resize(window.innerWidth, window.innerHeight);
   });
 
-  // ---- 世界（存档区块覆盖到新生成的地形上） ----
-  const worldGen = new WorldGen(seed, registry);
-  const world = new World(registry);
-  // 本会话内“玩家修改过的区块”权威副本：与世界共享同一 Uint8Array 引用，
-  // 因此编辑即时反映，保存时编码即为最新状态
-  const modifiedChunks: Map<string, Uint8Array> = save?.chunks ?? new Map();
-  const chunkManager = new ChunkManager(
-    scene,
-    world,
-    worldGen,
-    atlas,
-    defs,
-    (cx, cz) => modifiedChunks.get(chunkKey(cx, cz)) ?? null,
-  );
+  // ---- 双维度世界（主世界 + 下界）：各自 World + 生成器 + 区块管理器（独立 Worker 池） ----
+  // 下界用不同派生种子，与主世界地形无关；坐标 1:8（下界 1 格 = 主世界 8 格）
+  const NETHER_SCALE = 8; // 下界 1 格 = 主世界 8 格（传送门坐标换算，#21 用）
+  void NETHER_SCALE;
+  const worldGenOver = new WorldGen(seed, registry, 'overworld');
+  const worldGenNether = new WorldGen((seed ^ 0x5dee1) | 0, registry, 'nether');
+  // 本会话内"玩家修改过的区块"权威副本：与世界共享同一 Uint8Array 引用，
+  // 因此编辑即时反映，保存时编码即为最新状态。主世界用存档键原样；下界加 n: 前缀。
+  const modifiedOver: Map<string, Uint8Array> = save?.chunks ?? new Map();
+  const modifiedNether: Map<string, Uint8Array> = new Map();
+  if (save?.meta.netherChunks) {
+    for (const [k, v] of save.meta.netherChunks) modifiedNether.set(k, v);
+  }
+  interface DimCtx {
+    world: World;
+    gen: WorldGen;
+    cm: ChunkManager;
+    modified: Map<string, Uint8Array>;
+  }
+  const dims: Record<Dimension, DimCtx> = {
+    overworld: {
+      world: new World(registry),
+      gen: worldGenOver,
+      modified: modifiedOver,
+      cm: null as unknown as ChunkManager,
+    },
+    nether: {
+      world: new World(registry),
+      gen: worldGenNether,
+      modified: modifiedNether,
+      cm: null as unknown as ChunkManager,
+    },
+  };
+  for (const dim of ['overworld', 'nether'] as Dimension[]) {
+    const d = dims[dim];
+    d.cm = new ChunkManager(
+      scene,
+      d.world,
+      d.gen,
+      atlas,
+      defs,
+      (cx, cz) => d.modified.get(chunkKey(cx, cz)) ?? null,
+      dim,
+    );
+  }
+  // 当前维度（读档恢复；缺省主世界）
+  let dimension: Dimension = save?.meta.dimension === 'nether' ? 'nether' : 'overworld';
+  /** 当前维度上下文（世界/区块管理器/修改集随维度切换） */
+  const cur = (): DimCtx => dims[dimension];
+  const worldGen = dims.overworld.gen; // 出生点用主世界生成器
+  const chunkManager = dims.overworld.cm; // 材质/初始设置用（两池共享底层图集材质）
   const sky = new Sky(scene, renderer);
   const clouds = new Clouds(scene, seed);
   const hand = new Hand(chunkManager.opaqueMat);
@@ -210,11 +247,11 @@ function startGame(
   // 常规雾距由 sky.normalFog() 按当前渲染距离给出（水下切换后用于恢复）
   const underwaterColor = new THREE.Color();
   const particles = new Particles(scene);
-  const drops = new DropManager(scene, world, chunkManager.opaqueMat);
-  const xpManager = new XpManager(scene, world);
-  const arrowManager = new ArrowManager(scene, world);
+  const drops = new DropManager(scene, cur().world, chunkManager.opaqueMat);
+  const xpManager = new XpManager(scene, cur().world);
+  const arrowManager = new ArrowManager(scene, cur().world);
   // 点燃的 TNT：引信尽以 power=4 大爆炸（MC TNT 威力 4、1.14+ 全掉落）
-  const tntManager = new TntManager(scene, world, (x, y, z) =>
+  const tntManager = new TntManager(scene, cur().world, (x, y, z) =>
     explode(x, y, z, 4, 1),
   );
   // 生物掉落（MC 一致）：猪 1-3 生猪排；僵尸 0-2 腐肉+5 经验；羊 1 羊毛+1-2 生羊肉；
@@ -222,7 +259,7 @@ function startGame(
   // 苦力怕 0-2 火药；被动生物 1-3 经验，敌对生物 5 经验
   const mobManager = new MobManager(
     scene,
-    world,
+    cur().world,
     particles,
     (kind, x, y, z) => {
       const xp = (): number => 1 + Math.floor(Math.random() * 3);
@@ -295,8 +332,8 @@ function startGame(
     mobManager.spawn(k, body.x + 3, body.y + 1, body.z + 3);
   };
 
-  // ---- 玩家（有存档则恢复位置/视角/飞行） ----
-  const body = new PlayerBody(world);
+  // ---- 玩家（有存档则恢复位置/视角/飞行；坐标属当前维度） ----
+  const body = new PlayerBody(cur().world);
   if (save) {
     body.x = save.meta.player.x;
     body.y = save.meta.player.y;
@@ -578,6 +615,7 @@ function startGame(
   let stepDist = 0;
   let sprinting = false;
   let underwater = false;
+  let portalTimer = 0; // 站立于传送门内的累计秒数（≥1.2 触发跨维度）
   let eatTimer = 0;
   let nextCrunch = 0.4;
   let growTimer = 0; // 作物随机 tick 节流
@@ -647,14 +685,16 @@ function startGame(
     Number.isFinite(savedRd) && savedRd >= 4 && savedRd <= 16
       ? savedRd
       : RENDER_DIST;
-  chunkManager.setRenderDist(initRd);
+  for (const dim of ['overworld', 'nether'] as Dimension[])
+    dims[dim].cm.setRenderDist(initRd);
   sky.setRenderDist(initRd);
   rdSlider.value = String(initRd);
   rdValue.textContent = String(initRd);
   rdSlider.oninput = () => {
     const v = Number(rdSlider.value);
     rdValue.textContent = String(v);
-    chunkManager.setRenderDist(v);
+    for (const dim of ['overworld', 'nether'] as Dimension[])
+      dims[dim].cm.setRenderDist(v);
     sky.setRenderDist(v);
     localStorage.setItem('mc-render-dist', String(v));
   };
@@ -681,6 +721,202 @@ function startGame(
       xp = 0; // MC：附魔按整级扣，清掉当前级进度
     }
     hud.setXp(xpLevel, xp / xpToNext(xpLevel), gameMode === 'survival');
+  };
+
+  // ---- 维度切换（主世界 ⇄ 下界，MC 传送门 1:8 坐标） ----
+  /**
+   * 换绑当前维度：玩家/流体/重力/红石/生物/掉落/经验/箭/TNT 全部切到目标世界，
+   * 清空旧维度活跃实体（不跨维度），切换雾/云氛围，并按 1:8 换算玩家坐标。
+   */
+  const switchDimension = (
+    target: Dimension,
+    destX: number,
+    destY: number,
+    destZ: number,
+  ): void => {
+    if (target === dimension) return;
+    dimension = target;
+    const w = cur().world;
+    body.setWorld(w);
+    fluid.setWorld(w);
+    gravity.setWorld(w);
+    redstone.setWorld(w);
+    mobManager.setWorld(w);
+    drops.setWorld(w);
+    xpManager.setWorld(w);
+    arrowManager.setWorld(w);
+    tntManager.setWorld(w);
+    // 氛围：下界暗红近雾 + 无云无天体；主世界恢复正常
+    const isNether = target === 'nether';
+    sky.setNether(isNether);
+    clouds.setVisible(!isNether);
+    const fog = scene.fog as THREE.Fog;
+    if (isNether) {
+      fog.near = 6;
+      fog.far = 64; // 洞窟内短视距
+    } else {
+      const nf = sky.normalFog();
+      fog.near = nf.near;
+      fog.far = nf.far;
+    }
+    // 重定位（坐标已换算到目标维度）
+    body.x = destX;
+    body.y = destY;
+    body.z = destZ;
+    body.vx = 0;
+    body.vy = 0;
+    body.vz = 0;
+    fallDist = 0;
+    // 强制新区块流式加载（ensure 以玩家为中心）
+    cur().cm.update(destX, destZ, 24, false);
+  };
+
+  /** 黑曜石传送门点火：右键门框内侧空气时，把整框内部填为 portal 方块（MC） */
+  const idPortalBlock = registry.byName.get('nether_portal')?.id ?? -1;
+  const idObsidian = registry.byName.get('obsidian')?.id ?? -1;
+
+  /**
+   * 在以 (x,y,z) 为内侧空气的竖直黑曜石框内填充传送门方块。
+   * 框沿水平轴 (ax,0,az) 延伸：先找该轴两端的黑曜石边界，内部逐格填 portal。
+   * 返回是否成功（找到合法框）。
+   */
+  const ignitePortal = (x: number, y: number, z: number): boolean => {
+    if (idPortalBlock < 0 || idObsidian < 0) return false;
+    const w = cur().world;
+    // 试两个水平轴
+    for (const [ax, az] of [
+      [1, 0],
+      [0, 1],
+    ] as const) {
+      // 沿 +轴与 -轴找黑曜石边界（框内壁）
+      let lo = 0;
+      let hi = 0;
+      for (let i = 1; i <= 3; i++) {
+        if (w.getBlock(x + ax * i, y, z + az * i) === idObsidian) {
+          hi = i;
+          break;
+        }
+      }
+      for (let i = 1; i <= 3; i++) {
+        if (w.getBlock(x - ax * i, y, z - az * i) === idObsidian) {
+          lo = i;
+          break;
+        }
+      }
+      if (hi === 0 || lo === 0) continue;
+      // 底边界：从 y 向下找黑曜石
+      let yb = -1;
+      for (let i = 1; i <= 4; i++) {
+        if (w.getBlock(x, y - i, z) === idObsidian) {
+          yb = y - i;
+          break;
+        }
+      }
+      if (yb < 0) continue;
+      // 顶边界：从 y 向上找黑曜石
+      let yt = -1;
+      for (let i = 1; i <= 4; i++) {
+        if (w.getBlock(x, y + i, z) === idObsidian) {
+          yt = y + i;
+          break;
+        }
+      }
+      if (yt < 0) continue;
+      // 填充内部（不含边框）
+      let filled = 0;
+      for (let ix = -lo + 1; ix <= hi - 1; ix++) {
+        for (let iy = yb + 1; iy <= yt - 1; iy++) {
+          const px = x + ax * ix;
+          const pz = z + az * ix;
+          const cur2 = w.getBlock(px, iy, pz);
+          if (cur2 === AIR || cur2 === idPortalBlock) {
+            applyEdit(px, iy, pz, idPortalBlock);
+            filled++;
+          }
+        }
+      }
+      if (filled > 0) {
+        sfx.playFuse(); // 点火声近似（MC 为 portal 触发声）
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /** 玩家是否站在传送门方块内（脚或头所在格） */
+  const inPortal = (): boolean => {
+    if (idPortalBlock < 0) return false;
+    const w = cur().world;
+    const fx = Math.floor(body.x);
+    const fz = Math.floor(body.z);
+    return (
+      w.getBlock(fx, Math.floor(body.y), fz) === idPortalBlock ||
+      w.getBlock(fx, Math.floor(body.y + 1), fz) === idPortalBlock
+    );
+  };
+
+  /**
+   * 触发跨维度传送：按 1:8 换算水平坐标，目标维度就近找可站立处，
+   * 若目标点附近无传送门则在落脚处自动建一座（MC 行为）。
+   */
+  const travelThroughPortal = (): void => {
+    const target: Dimension = dimension === 'overworld' ? 'nether' : 'overworld';
+    // 主世界→下界 ÷8；下界→主世界 ×8
+    const nx =
+      target === 'nether' ? body.x / NETHER_SCALE : body.x * NETHER_SCALE;
+    const nz =
+      target === 'nether' ? body.z / NETHER_SCALE : body.z * NETHER_SCALE;
+    const tw = dims[target].world;
+    // 目标世界就近找安全落点：从合理高度向下找首个可站立（下界封顶 128）
+    const tx = Math.floor(nx);
+    const tz = Math.floor(nz);
+    let ty = target === 'nether' ? 70 : 90;
+    // 先确保目标区块已生成（同步查 findSpawnY 前需有方块）
+    dims[target].cm.update(nx, nz, 24, false);
+    // 向下找第一个"脚+头为空气/可站立"且下方实心处
+    let found = -1;
+    for (let y = Math.min(ty, 118); y > (target === 'nether' ? 12 : 2); y--) {
+      const below = tw.getBlock(tx, y - 1, tz);
+      const feet = tw.getBlock(tx, y, tz);
+      const head = tw.getBlock(tx, y + 1, tz);
+      const solidBelow = below > 0 && registry.isSolid(below);
+      const freeFeet = feet === AIR || feet === idPortalBlock;
+      const freeHead = head === AIR || head === idPortalBlock;
+      if (solidBelow && freeFeet && freeHead) {
+        found = y;
+        break;
+      }
+    }
+    if (found < 0) found = target === 'nether' ? 70 : tw.findSpawnY(tx, tz);
+    // 切换维度并落脚
+    switchDimension(target, tx + 0.5, found, tz + 0.5);
+    // 若目标点附近无传送门方块，建一座迷你门 + 底座，便于回程（MC 生成对侧门）
+    ensureReturnPortal(tx, found, tz);
+  };
+
+  /** 在目标维度 (x,y,z) 附近建一座 4×5 黑曜石门并点亮内部（若附近无现成门） */
+  const ensureReturnPortal = (x: number, y: number, z: number): void => {
+    if (idPortalBlock < 0 || idObsidian < 0) return;
+    const w = cur().world;
+    // 附近 8 格已有 portal 则不建
+    for (let dy = -4; dy <= 4; dy++)
+      for (let dx = -8; dx <= 8; dx++)
+        for (let dz = -8; dz <= 8; dz++)
+          if (w.getBlock(x + dx, y + dy, z + dz) === idPortalBlock) return;
+    // 建门：沿 X 轴 4 宽 5 高（底 y，内空 2×3）
+    const bx = x - 1; // 门左下角
+    const by = y;
+    const bz = z;
+    for (let ix = 0; ix < 4; ix++) {
+      for (let iy = 0; iy < 5; iy++) {
+        const isFrame = ix === 0 || ix === 3 || iy === 0 || iy === 4;
+        const px = bx + ix;
+        const py = by + iy;
+        if (isFrame) applyEdit(px, py, bz, idObsidian);
+        else applyEdit(px, py, bz, idPortalBlock);
+      }
+    }
+    // 门底铺一层黑曜石底座防坠落（底座即门框底行）
   };
 
   // ---- 生存：受伤 / 死亡 / 重生 ----
@@ -776,9 +1012,11 @@ function startGame(
   const savedAo = localStorage.getItem('mc-smooth-lighting');
   const initAo = savedAo === null ? true : savedAo === '1';
   aoCheck.checked = initAo;
-  chunkManager.setSmoothLighting(initAo);
+  for (const dim of ['overworld', 'nether'] as Dimension[])
+    dims[dim].cm.setSmoothLighting(initAo);
   aoCheck.onchange = () => {
-    chunkManager.setSmoothLighting(aoCheck.checked);
+    for (const dim of ['overworld', 'nether'] as Dimension[])
+      dims[dim].cm.setSmoothLighting(aoCheck.checked);
     localStorage.setItem('mc-smooth-lighting', aoCheck.checked ? '1' : '0');
   };
 
@@ -800,10 +1038,11 @@ function startGame(
   renderer.domElement.addEventListener('click', () => {
     if (state === 'playing' && !controls.locked) controls.lock();
   });
-  // 诊断钩子（控制台调试用）
+  // 诊断钩子（控制台调试用）；__world() 返回当前维度世界
   (window as unknown as { __mc: unknown }).__mc = {
     chunkManager,
-    world,
+    dims,
+    cur,
     body,
     camera,
     controls,
@@ -841,8 +1080,10 @@ function startGame(
           armor: gameMode === 'survival' ? survivalInv.serializeArmor() : undefined,
           furnaces: [...furnaces.values()].map(serializeFurnace),
           spawnPoint: { x: spawnPoint.x, y: spawnPoint.y, z: spawnPoint.z },
+          dimension,
+          netherChunks: modifiedNether.size > 0 ? modifiedNether : undefined,
         },
-        modifiedChunks,
+        modifiedOver,
       )
       .catch((e) => console.warn('自动保存失败', e))
       .finally(() => {
@@ -871,19 +1112,21 @@ function startGame(
     ];
   }
 
-  /** 写入方块并同步：网格重建 + 修改集合（存档用） */
+  /** 写入方块并同步：网格重建 + 修改集合（存档用）。作用于当前维度世界。 */
   function applyEdit(wx: number, y: number, wz: number, id: number): void {
-    const oldId = world.getBlock(wx, y, wz);
-    const edit = world.setBlock(wx, y, wz, id);
+    const w = cur().world;
+    const cm = cur().cm;
+    const oldId = w.getBlock(wx, y, wz);
+    const edit = w.setBlock(wx, y, wz, id);
     if (!edit) return;
-    chunkManager.markEdited(edit.cx, edit.cz, edit.lx, edit.lz);
+    cm.markEdited(edit.cx, edit.cz, edit.lx, edit.lz);
     // 光照可能跨区块传播（最远 15 格）：涉及光源或邻域有光时按 3×3 重网格化
     const oldLum = oldId > 0 ? (registry.def(oldId)?.luminance ?? 0) : 0;
     const newLum = id > 0 ? (registry.def(id)?.luminance ?? 0) : 0;
-    if (oldLum > 0 || newLum > 0 || world.hasLightNear(edit.cx, edit.cz))
-      chunkManager.markEditedArea(edit.cx, edit.cz);
-    const data = world.chunks.get(chunkKey(edit.cx, edit.cz));
-    if (data) modifiedChunks.set(chunkKey(edit.cx, edit.cz), data);
+    if (oldLum > 0 || newLum > 0 || w.hasLightNear(edit.cx, edit.cz))
+      cm.markEditedArea(edit.cx, edit.cz);
+    const data = w.chunks.get(chunkKey(edit.cx, edit.cz));
+    if (data) cur().modified.set(chunkKey(edit.cx, edit.cz), data);
     // 唤醒流体（水位重算/扩散/消退）与重力方块（上方悬空则开始下落）
     fluid.wake(wx, y, wz);
     gravity.tryStart(wx, y + 1, wz);
@@ -893,17 +1136,17 @@ function startGame(
   }
 
   // ---- 水流动 + 重力方块（MC 物理）：与 applyEdit 闭环，方块改动即触发 ----
-  const fluid = new FluidSimulator(world, applyEdit);
+  const fluid = new FluidSimulator(cur().world, applyEdit);
   const gravity = new FallingBlockManager(
     scene,
-    world,
+    cur().world,
     chunkManager.opaqueMat,
     applyEdit,
     (def, x, y, z) => drops.spawnBlock(def, x, y, z),
   );
 
   // ---- 红石电路（MC）：电源→红石粉衰减→用电器；方块改动经 applyEdit 唤醒 ----
-  const redstone = new RedstoneSimulator(world, {
+  const redstone = new RedstoneSimulator(cur().world, {
     setBlock: applyEdit,
     igniteTnt: (x, y, z) => {
       applyEdit(x, y, z, AIR);
@@ -932,7 +1175,7 @@ function startGame(
           const bx = cx + dx;
           const by = cy + dy;
           const bz = cz + dz;
-          const id = world.getBlock(bx, by, bz);
+          const id = cur().world.getBlock(bx, by, bz);
           if (id === AIR) continue;
           const def = registry.def(id);
           if (!def || def.hardness < 0) continue; // 基岩/水免疫
@@ -1007,7 +1250,7 @@ function startGame(
       for (let dy = -1; dy <= 1; dy++)
         for (let dz = -4; dz <= 4; dz++) {
           if (Math.abs(dx) + Math.abs(dz) > 4) continue;
-          if (registry.isWater(world.getBlock(x + dx, y + dy, z + dz)))
+          if (registry.isWater(cur().world.getBlock(x + dx, y + dy, z + dz)))
             return true;
         }
     return false;
@@ -1078,7 +1321,7 @@ function startGame(
   }
 
   function breakBlock(x: number, y: number, z: number): void {
-    const id = world.getBlock(x, y, z);
+    const id = cur().world.getBlock(x, y, z);
     const def = registry.def(id);
     if (!def || def.hardness < 0) return;
     applyEdit(x, y, z, AIR);
@@ -1187,7 +1430,7 @@ function startGame(
     const tx = currentHit.x + currentHit.nx;
     const ty = currentHit.y + currentHit.ny;
     const tz = currentHit.z + currentHit.nz;
-    const existing = world.getBlock(tx, ty, tz);
+    const existing = cur().world.getBlock(tx, ty, tz);
     if (existing !== AIR) {
       const ed = registry.def(existing);
       if (!ed || (!ed.replaceable && !ed.fluid)) return;
@@ -1203,7 +1446,7 @@ function startGame(
     camera.getWorldDirection(tmpDir);
     const eye = camera.position;
     currentHit = raycastVoxel(
-      world,
+      cur().world,
       eye.x,
       eye.y,
       eye.z,
@@ -1342,6 +1585,13 @@ function startGame(
         );
         sfx.playFuse();
         useCooldown = 0.3;
+      } else if (hitDef && hitDef.name === 'obsidian') {
+        // 黑曜石门框右键：尝试点燃下界传送门（命中框内侧空气格填 portal）
+        const fx = currentHit!.x + currentHit!.nx;
+        const fy = currentHit!.y + currentHit!.ny;
+        const fz = currentHit!.z + currentHit!.nz;
+        ignitePortal(fx, fy, fz);
+        useCooldown = 0.3;
       } else if (
         hitDef &&
         (hitDef.name === 'dirt' || hitDef.name === 'grass_block') &&
@@ -1361,7 +1611,7 @@ function startGame(
         const ax = currentHit!.x;
         const ay = currentHit!.y + 1;
         const az = currentHit!.z;
-        if (world.getBlock(ax, ay, az) === AIR) {
+        if (cur().world.getBlock(ax, ay, az) === AIR) {
           applyEdit(ax, ay, az, registry.id('wheat_0'));
           if (gameMode === 'survival') consumeHeldMaterial('wheat_seeds');
           sfx.playPlace();
@@ -1397,7 +1647,7 @@ function startGame(
         const tx = currentHit.x + currentHit.nx;
         const ty = currentHit.y + currentHit.ny;
         const tz = currentHit.z + currentHit.nz;
-        const existing = world.getBlock(tx, ty, tz);
+        const existing = cur().world.getBlock(tx, ty, tz);
         const ed = existing > 0 ? registry.def(existing) : null;
         if (existing === AIR || (ed && ed.replaceable)) {
           applyEdit(tx, ty, tz, registry.id('redstone_dust_off'));
@@ -1453,7 +1703,7 @@ function startGame(
     const hidden = document.hidden;
 
     if (state === 'loading') {
-      const p = chunkManager.update(body.x, body.z, 24, true);
+      const p = cur().cm.update(body.x, body.z, 24, true);
       if (p >= 1) {
         state = 'ready';
         startScreen.setReady(enterWorld);
@@ -1461,7 +1711,7 @@ function startGame(
         startScreen.setProgress(`正在生成世界… ${Math.round(p * 100)}%`, p);
       }
       sky.update(dt, camera, []);
-      chunkManager.dayUniform.value = sky.daylight;
+      cur().cm.dayUniform.value = sky.daylight;
       camera.position.set(body.x, body.y + EYE_HEIGHT, body.z);
       if (!hidden) {
         renderer.clear();
@@ -1550,6 +1800,16 @@ function startGame(
 
       updateInteraction(dt);
       hand.update(dt, Math.hypot(body.vx, body.vz), body.onGround, attackHeld);
+      // 传送门：站立于 portal 方块内累计 1.2s（MC 约 4s，此处加速体验）触发跨维度
+      if (inPortal()) {
+        portalTimer += dt;
+        if (portalTimer >= 1.2) {
+          portalTimer = 0;
+          travelThroughPortal();
+        }
+      } else {
+        portalTimer = 0;
+      }
       // 生物：游荡 AI + 追击 + 生成/消失（暂停菜单打开时随世界冻结）
       // 僵尸近战：生存扣 3 血（1.5 心）并击退；骷髅射箭；苦力怕引爆
       mobManager.update(
@@ -1653,7 +1913,7 @@ function startGame(
           const gx = px0 + ((Math.random() * 33) | 0) - 16;
           const gy = Math.max(1, py0 + ((Math.random() * 17) | 0) - 8);
           const gz = pz0 + ((Math.random() * 33) | 0) - 16;
-          const gid = world.getBlock(gx, gy, gz);
+          const gid = cur().world.getBlock(gx, gy, gz);
           const gdef = gid > 0 ? registry.def(gid) : null;
           if (gdef && gdef.name.startsWith('wheat_')) {
             const stage = Number(gdef.name.slice(6));
@@ -1663,7 +1923,7 @@ function startGame(
           } else if (gdef && gdef.name === 'farmland') {
             // 退化：4 格内无水且上方非作物时，概率退回泥土（MC 干旱退化）
             if (Math.random() < 0.02 && !hasWaterNear(gx, gy, gz)) {
-              const above = world.getBlock(gx, gy + 1, gz);
+              const above = cur().world.getBlock(gx, gy + 1, gz);
               const adef = above > 0 ? registry.def(above) : null;
               if (!adef || !adef.name.startsWith('wheat_'))
                 applyEdit(gx, gy, gz, registry.id('dirt'));
@@ -1725,17 +1985,17 @@ function startGame(
     }
 
     // 区块流式更新（游戏中保守上传预算；进度统计仅加载阶段开启）
-    chunkManager.update(body.x, body.z, state === 'playing' ? 6 : 24, false);
+    cur().cm.update(body.x, body.z, state === 'playing' ? 6 : 24, false);
 
     sky.update(dt, camera, []);
-    chunkManager.dayUniform.value = sky.daylight;
+    cur().cm.dayUniform.value = sky.daylight;
     clouds.update(elapsed, body.x, body.z, sky.daylight);
 
     // 水下雾：相机没入水中 → 深蓝绿短视距雾 + 清屏色；出水恢复
     const uw =
       state === 'playing' &&
       registry.isWater(
-        world.getBlock(
+        cur().world.getBlock(
           Math.floor(camera.position.x),
           Math.floor(camera.position.y),
           Math.floor(camera.position.z),
@@ -1767,8 +2027,8 @@ function startGame(
     debugPanel.update(dt, () =>
       [
         `XYZ: ${body.x.toFixed(2)} / ${body.y.toFixed(2)} / ${body.z.toFixed(2)}`,
-        `区块: ${Math.floor(body.x / 16)}, ${Math.floor(body.z / 16)}  朝向: ${facingText()}`,
-        `已加载区块: ${chunkManager.loadedCount}  已网格化: ${chunkManager.meshedCount}  已修改: ${modifiedChunks.size}`,
+        `区块: ${Math.floor(body.x / 16)}, ${Math.floor(body.z / 16)}  朝向: ${facingText()}  维度: ${dimension === 'nether' ? '下界' : '主世界'}`,
+        `已加载区块: ${cur().cm.loadedCount}  已网格化: ${cur().cm.meshedCount}  已修改: ${cur().modified.size}`,
         `第 ${sky.day} 天  种子: ${seedLabel}`,
         body.flying
           ? '飞行中'

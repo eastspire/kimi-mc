@@ -85,8 +85,14 @@ export class Clouds {
     scene.add(this.mesh);
   }
 
+  /** 下界维度隐藏云（洞窟顶部无天空） */
+  setVisible(v: boolean): void {
+    this.mesh.visible = v;
+  }
+
   /** t 为累计秒数；位置按 768 周期对齐玩家（跳跃不可见），云图随漂移滑过 */
   update(t: number, px: number, pz: number, daylight: number): void {
+    if (!this.mesh.visible) return;
     const drift = (t * DRIFT_SPEED) % PERIOD;
     this.mesh.position.x = drift + Math.round((px - drift) / PERIOD) * PERIOD;
     this.mesh.position.z = Math.round(pz / PERIOD) * PERIOD;

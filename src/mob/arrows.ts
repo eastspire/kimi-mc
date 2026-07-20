@@ -46,6 +46,13 @@ export class ArrowManager {
     return this.arrows.length;
   }
 
+  /** 维度切换时换绑世界并清除飞行中的箭（属于旧维度场景） */
+  setWorld(w: World): void {
+    this.world = w;
+    for (const a of this.arrows) this.scene.remove(a.mesh);
+    this.arrows.length = 0;
+  }
+
   /** 从 (x,y,z) 朝单位方向 (dx,dy,dz) 射出 */
   spawn(
     x: number,

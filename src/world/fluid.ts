@@ -41,6 +41,14 @@ export class FluidSimulator {
     private applyEdit: (x: number, y: number, z: number, id: number) => void,
   ) {}
 
+  /** 维度切换时换绑世界并清空待处理队列（旧维度队列对新世界无意义） */
+  setWorld(w: World): void {
+    this.world = w;
+    this.queue.length = 0;
+    this.queued.clear();
+    this.acc = 0;
+  }
+
   private key(x: number, y: number, z: number): number {
     return ((x & 0x3ff) << 17) | ((z & 0x3ff) << 7) | (y & 0x7f);
   }

@@ -95,6 +95,8 @@ export class Sky {
   private stars: THREE.Points;
   private starMat: THREE.PointsMaterial;
   private underwater = false;
+  private nether = false;
+  private readonly NETHER_FOG = new THREE.Color(0x3a1208); // 下界暗红雾
   private readonly dirV = new THREE.Vector3(); // 复用，避免每帧分配
   /** 渲染距离（区块），运行时可调，雾与天体距离随之更新 */
   private dist = RENDER_DIST;
@@ -134,6 +136,18 @@ export class Sky {
     const ang = (this.time / DAY_LENGTH) * Math.PI * 2 - Math.PI / 2;
     const sunY = Math.sin(ang); // >0 白天
     const sunX = Math.cos(ang);
+
+    if (this.nether) {
+      // 下界：无昼夜，锁定昏暗光照 + 暗红雾，隐藏天体星辰
+      this.daylight = 0.35;
+      (this.scene.fog as THREE.Fog).color.copy(this.NETHER_FOG);
+      this.renderer.setClearColor(this.NETHER_FOG);
+      this.sun.visible = false;
+      this.moon.visible = false;
+      this.stars.visible = false;
+      for (const m of tinted) (m as THREE.MeshBasicMaterial).color.setScalar(1);
+      return;
+    }
 
     // 亮度：平滑过渡，夜里保底 0.22
     const t = THREE.MathUtils.smoothstep(sunY, -0.12, 0.25);
@@ -192,5 +206,10 @@ export class Sky {
   /** 水下时隐藏天体（雾由 main 切换） */
   setUnderwater(u: boolean): void {
     this.underwater = u;
+  }
+
+  /** 下界维度：压暗天空/雾为暗红、隐藏天体星辰、锁定昏暗光照（无昼夜） */
+  setNether(n: boolean): void {
+    this.nether = n;
   }
 }

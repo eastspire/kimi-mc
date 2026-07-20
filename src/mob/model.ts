@@ -271,6 +271,29 @@ function paintCreeper(ctx: CanvasRenderingContext2D): void {
   f(0, 28, 16, 4, '#2c5018');
 }
 
+function paintSpider(ctx: CanvasRenderingContext2D): void {
+  const f = (x: number, y: number, w: number, h: number, c: string): void => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const body = '#3a3230';
+  const dark = '#2a2422';
+  const light = '#4a423e';
+  // 头部 (0,0)-(32,16)：棕黑底
+  f(0, 0, 32, 16, body);
+  // 头正面 (8,8)-(16,16)：红色复眼（MC 蜘蛛红眼）
+  f(9, 10, 2, 2, '#c02818');
+  f(13, 10, 2, 2, '#c02818');
+  f(10, 13, 1, 1, '#701008');
+  f(13, 13, 1, 1, '#701008');
+  // 身体 (16,16)：深棕 + 浅色背纹
+  f(16, 16, 40, 16, body);
+  for (let i = 0; i < 10; i++) f(18 + ((i * 7) % 36), 18 + ((i * 5) % 12), 2, 1, light);
+  f(16, 16, 40, 2, dark);
+  // 腿 (0,16)：深棕
+  f(0, 16, 16, 16, dark);
+}
+
 function paintZombie(ctx: CanvasRenderingContext2D): void {
   const f = (x: number, y: number, w: number, h: number, c: string): void => {
     ctx.fillStyle = c;
@@ -328,6 +351,7 @@ let cowAssets: MobAssets | null = null;
 let chickenAssets: MobAssets | null = null;
 let skeletonAssets: MobAssets | null = null;
 let creeperAssets: MobAssets | null = null;
+let spiderAssets: MobAssets | null = null;
 
 function makeAssets(paint: (ctx: CanvasRenderingContext2D) => void, geo: MobAssets['geo']): MobAssets {
   const tex = makeTexture(paint);
@@ -418,6 +442,17 @@ function getCreeperAssets(): MobAssets {
     });
   }
   return creeperAssets;
+}
+
+function getSpiderAssets(): MobAssets {
+  if (!spiderAssets) {
+    spiderAssets = makeAssets(paintSpider, {
+      body: mcBox(12, 6, 10, 16, 16),
+      head: mcBox(8, 6, 8, 0, 0),
+      leg: mcBox(6, 1, 1, 0, 16),
+    });
+  }
+  return spiderAssets;
 }
 
 export function buildPigModel(): MobModel {
@@ -719,6 +754,45 @@ export function buildCreeperModel(): MobModel {
   return { group, head, legs, arms: [], meshes, material: a.material, hurtMaterial: a.hurt };
 }
 
+/** 蜘蛛模型：低矮宽身 + 红眼头 + 每侧 4 条横伸细腿（MC 剪影） */
+export function buildSpiderModel(): MobModel {
+  const a = getSpiderAssets();
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+  const add = (m: THREE.Mesh): THREE.Mesh => {
+    meshes.push(m);
+    return m;
+  };
+
+  const body = add(new THREE.Mesh(a.geo.body, a.material));
+  body.position.y = 7 * PX;
+  group.add(body);
+
+  const head = new THREE.Group();
+  head.position.set(0, 8 * PX, -6 * PX);
+  const headMesh = add(new THREE.Mesh(a.geo.head, a.material));
+  headMesh.position.z = -3 * PX;
+  head.add(headMesh);
+  group.add(head);
+
+  // 每侧 4 条腿：腿根在身体两侧，向外横伸（绕 z 轴外张）
+  const legs: THREE.Group[] = [];
+  const zSlots = [-3, -1, 1, 3];
+  for (const side of [-1, 1]) {
+    for (const lz of zSlots) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 6 * PX, 7 * PX, lz * PX);
+      pivot.rotation.z = side * -0.5; // 外张下压
+      const mesh = add(new THREE.Mesh(a.geo.leg, a.material));
+      mesh.position.x = side * 3 * PX; // 腿从根部向外延伸
+      pivot.add(mesh);
+      group.add(pivot);
+      legs.push(pivot);
+    }
+  }
+  return { group, head, legs, arms: [], meshes, material: a.material, hurtMaterial: a.hurt };
+}
+
 /** 昼夜亮度同步到生物材质（与天空 daylight 一致，主循环每帧调用） */
 export function setMobBrightness(d: number): void {
   if (pigAssets) pigAssets.material.color.setScalar(d);
@@ -728,4 +802,5 @@ export function setMobBrightness(d: number): void {
   if (chickenAssets) chickenAssets.material.color.setScalar(d);
   if (skeletonAssets) skeletonAssets.material.color.setScalar(d);
   if (creeperAssets) creeperAssets.material.color.setScalar(d);
+  if (spiderAssets) spiderAssets.material.color.setScalar(d);
 }

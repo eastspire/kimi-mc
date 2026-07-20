@@ -6,10 +6,12 @@
 // ============================================================
 
 export interface RecipeOut {
-  /** 产物方块名（与 tool 二选一） */
+  /** 产物方块名（与 tool/food 三选一） */
   block?: string;
   /** 产物工具 id（TOOLS 键） */
   tool?: string;
+  /** 产物食物 id（FOODS 键） */
+  food?: string;
   count: number;
 }
 
@@ -33,6 +35,8 @@ const C = 'cobblestone';
 const L = 'oak_log';
 const S = 't:stick';
 const I = 't:iron_ingot';
+const D = 't:diamond';
+const G = 't:gold_ingot';
 
 const RECIPES: Recipe[] = [
   // ---- 2×2 可合成 ----
@@ -71,8 +75,8 @@ const RECIPES: Recipe[] = [
     tool: 'diamond_axe',
     count: 1,
   }),
-  // 弓：3 木棍 + 3 羽毛（权宜替代线——暂无蜘蛛；摆法同 MC 弓）
-  R(3, 3, ['', S, 't:feather', S, '', 't:feather', '', S, 't:feather'], {
+  // 弓：3 木棍 + 3 线（MC 原版摆法）
+  R(3, 3, ['', S, 't:string', S, '', 't:string', '', S, 't:string'], {
     tool: 'bow',
     count: 1,
   }),
@@ -93,6 +97,38 @@ const RECIPES: Recipe[] = [
     ],
     { block: 'tnt', count: 1 },
   ),
+  // ---- 锹（1 原料 + 2 棍） ----
+  R(1, 3, [P, S, S], { tool: 'wooden_shovel', count: 1 }),
+  R(1, 3, [C, S, S], { tool: 'stone_shovel', count: 1 }),
+  R(1, 3, [I, S, S], { tool: 'iron_shovel', count: 1 }),
+  R(1, 3, [D, S, S], { tool: 'diamond_shovel', count: 1 }),
+  // ---- 剑（2 原料 + 1 棍） ----
+  R(1, 3, [P, P, S], { tool: 'wooden_sword', count: 1 }),
+  R(1, 3, [C, C, S], { tool: 'stone_sword', count: 1 }),
+  R(1, 3, [I, I, S], { tool: 'iron_sword', count: 1 }),
+  R(1, 3, [D, D, S], { tool: 'diamond_sword', count: 1 }),
+  R(1, 3, [G, G, S], { tool: 'gold_sword', count: 1 }),
+  // ---- 锄（2 原料 + 2 棍，横排） ----
+  R(2, 3, [P, P, S, '', S, ''], { tool: 'wooden_hoe', count: 1 }),
+  R(2, 3, [C, C, S, '', S, ''], { tool: 'stone_hoe', count: 1 }),
+  R(2, 3, [I, I, S, '', S, ''], { tool: 'iron_hoe', count: 1 }),
+  R(2, 3, [D, D, S, '', S, ''], { tool: 'diamond_hoe', count: 1 }),
+  // ---- 火把：煤在上 + 棍在下（4 个） ----
+  R(1, 2, ['t:coal', S], { block: 'torch', count: 4 }),
+  // ---- 骨粉：1 骨头 → 3 骨粉 ----
+  R(1, 1, ['t:bone'], { tool: 'bone_meal', count: 3 }),
+  // ---- 面包：3 小麦一行 ----
+  R(3, 1, ['t:wheat_item', 't:wheat_item', 't:wheat_item'], {
+    food: 'bread',
+    count: 1,
+  }),
+  // ---- 苔石：圆石 + 藤蔓权宜（用树叶代替） ----
+  R(2, 1, ['cobblestone', 'oak_leaves'], { block: 'mossy_cobble', count: 1 }),
+  // ---- 书架：3 木板 + 3 书权宜（用皮革代替书） ----
+  R(3, 3, [P, P, P, 't:leather', 't:leather', 't:leather', P, P, P], {
+    block: 'bookshelf',
+    count: 1,
+  }),
 ];
 
 /** 原料格内容：方块名；'' 表示该位置必须为空 */

@@ -1,6 +1,7 @@
 import type { BlockRegistry } from '../core/block-registry';
 import { toolById } from '../item/tools';
 import { matchRecipe } from '../item/recipes';
+import { FOODS } from '../item/foods';
 import {
   drawBlockIcon,
   drawToolIcon,
@@ -157,6 +158,11 @@ export class CraftingTable {
       const td = toolById(out.tool);
       if (td)
         return { block: null, food: null, tool: { def: td, count: out.count } };
+    }
+    if (out.food) {
+      const fd = FOODS[out.food as keyof typeof FOODS];
+      if (fd)
+        return { block: null, food: { def: fd, count: out.count }, tool: null };
     }
     return null;
   }

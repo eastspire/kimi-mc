@@ -64,6 +64,9 @@ export class WorldGen {
   private idIron: number;
   private idGold: number;
   private idDiamond: number;
+  private idLapis: number;
+  private idRedstone: number;
+  private idEmerald: number;
   private idTallGrass: number;
   private idFlowerRed: number;
   private idFlowerYellow: number;
@@ -94,6 +97,9 @@ export class WorldGen {
     this.idIron = reg.id('iron_ore');
     this.idGold = reg.id('gold_ore');
     this.idDiamond = reg.id('diamond_ore');
+    this.idLapis = reg.id('lapis_ore');
+    this.idRedstone = reg.id('redstone_ore');
+    this.idEmerald = reg.id('emerald_ore');
     this.idTallGrass = reg.id('tall_grass');
     this.idFlowerRed = reg.id('flower_red');
     this.idFlowerYellow = reg.id('flower_yellow');
@@ -127,8 +133,11 @@ export class WorldGen {
     const s = this.oreSalt;
     if (y < 70 && hash3i(wx, y, wz, s ^ 0xc0a1) < 0.011) return this.idCoal;
     if (y < 40 && hash3i(wx, y, wz, s ^ 0x1205) < 0.0055) return this.idIron;
+    if (y < 30 && hash3i(wx, y, wz, s ^ 0x1a91) < 0.002) return this.idLapis;
     if (y < 20 && hash3i(wx, y, wz, s ^ 0x601d) < 0.002) return this.idGold;
+    if (y < 16 && hash3i(wx, y, wz, s ^ 0xed57) < 0.0025) return this.idRedstone;
     if (y < 16 && hash3i(wx, y, wz, s ^ 0xd1a0) < 0.0012) return this.idDiamond;
+    if (y < 24 && hash3i(wx, y, wz, s ^ 0x3ee1d) < 0.0008) return this.idEmerald;
     return AIR;
   }
 

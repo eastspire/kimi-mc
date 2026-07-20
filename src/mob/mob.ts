@@ -7,6 +7,7 @@ import {
   buildChickenModel,
   buildSkeletonModel,
   buildCreeperModel,
+  buildSpiderModel,
   setMobHurt,
   type MobModel,
 } from './model';
@@ -27,7 +28,8 @@ export type MobKind =
   | 'cow'
   | 'chicken'
   | 'skeleton'
-  | 'creeper';
+  | 'creeper'
+  | 'spider';
 
 const GRAVITY = 27;
 const TERMINAL_VEL = -52;
@@ -54,6 +56,7 @@ const DIMS: Record<MobKind, MobDims> = {
   chicken: { half: 0.3, height: 0.7, speed: 1.3, hp: 4 },
   skeleton: { half: 0.3, height: 1.95, speed: 1.4, hp: 20 },
   creeper: { half: 0.3, height: 1.7, speed: 1.3, hp: 20 },
+  spider: { half: 0.7, height: 0.9, speed: 1.6, hp: 16 },
 };
 
 /** 腿摆动相位偏移：四足对角同相，双足左右交替 */
@@ -65,6 +68,7 @@ const LEG_PHASE: Record<MobKind, number[]> = {
   chicken: [0, Math.PI],
   skeleton: [0, Math.PI],
   creeper: [0, Math.PI, Math.PI, 0],
+  spider: [0, Math.PI, Math.PI, 0, Math.PI, 0, 0, Math.PI],
 };
 
 const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
@@ -75,14 +79,18 @@ const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
   chicken: buildChickenModel,
   skeleton: buildSkeletonModel,
   creeper: buildCreeperModel,
+  spider: buildSpiderModel,
 };
 
-/** 敌对生物（追击玩家）；骷髅/僵尸怕日晒，苦力怕不怕 */
+/** 敌对生物（追击玩家）；骷髅/僵尸怕日晒，苦力怕/蜘蛛不怕 */
 export const HOSTILE: ReadonlySet<MobKind> = new Set([
   'zombie',
   'skeleton',
   'creeper',
+  'spider',
 ]);
+/** 条件敌对：白天中立、夜晚敌对（MC 蜘蛛特性） */
+export const CONDITIONAL_HOSTILE: ReadonlySet<MobKind> = new Set(['spider']);
 export const SUN_BURNS: ReadonlySet<MobKind> = new Set(['zombie', 'skeleton']);
 
 export class Mob {
@@ -131,7 +139,6 @@ export class Mob {
   private walkPhase = 0;
   private colX = false;
   private colZ = false;
-  private readonly waterId: number;
   private readonly legPhase: number[];
 
   private hurtTimer = 0;
@@ -164,7 +171,6 @@ export class Mob {
     this.yaw = Math.random() * Math.PI * 2;
     this.aiTimer = 1 + Math.random() * 3;
     this.legPhase = LEG_PHASE[kind];
-    this.waterId = world.reg.id('water');
     this.model = MODEL_BUILDER[kind]();
     this.syncModel(0);
   }
@@ -272,7 +278,7 @@ export class Mob {
       const d = Math.hypot(dx, dz);
       const dy = Math.abs(this.targetY - this.y);
       if (d < CHASE_RANGE && dy < 10) {
-        if (this.kind === 'zombie') {
+        if (this.kind === 'zombie' || this.kind === 'spider') {
           chasing = true;
           this.yaw = Math.atan2(-dx, -dz);
           if (d < ATTACK_RANGE + this.half && dy < 2.2 && this.attackTimer <= 0) {
@@ -280,6 +286,9 @@ export class Mob {
             this.attackAnim = 0.45;
             this.attackLanded = true;
           }
+          // 蜘蛛跃击：追击接近时概率前扑跳起（MC 蜘蛛特性）
+          if (this.kind === 'spider' && this.onGround && d < 6 && d > 2 && Math.random() < 0.02)
+            this.vy = JUMP_VEL * 1.1;
         } else if (this.kind === 'skeleton') {
           this.yaw = Math.atan2(-dx, -dz);
           if (d > 10) chasing = true; // 接近到射程停住（MC 站桩输出）
@@ -352,7 +361,7 @@ export class Mob {
       Math.floor(this.y + 0.3),
       Math.floor(this.z),
     );
-    if (feetId === this.waterId) {
+    if (this.world.reg.isWater(feetId)) {
       this.vy -= WATER_GRAVITY * dt;
       this.vy = Math.min(this.vy + 26 * dt, WATER_SWIM_UP);
     } else {

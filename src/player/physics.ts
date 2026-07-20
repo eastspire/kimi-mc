@@ -114,12 +114,11 @@ export class PlayerBody {
   step(input: MoveInput, dt: number): void {
     this.collidedX = false;
     this.collidedZ = false;
-    // 水检测（脚部与头部）
+    // 水检测（脚部与头部）：任意水位的水方块都算（含流动水）
     const feetBlock = this.world.getBlock(Math.floor(this.x), Math.floor(this.y + 0.4), Math.floor(this.z));
     const headBlock = this.world.getBlock(Math.floor(this.x), Math.floor(this.y + this.eyeHeight()), Math.floor(this.z));
-    const fluidId = this.world.reg.id('water');
-    this.inWater = feetBlock === fluidId || headBlock === fluidId;
-    this.headInWater = headBlock === fluidId;
+    this.inWater = this.world.reg.isWater(feetBlock) || this.world.reg.isWater(headBlock);
+    this.headInWater = this.world.reg.isWater(headBlock);
 
     // 期望水平速度
     const speed = this.flying

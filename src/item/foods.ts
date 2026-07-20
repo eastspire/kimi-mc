@@ -149,6 +149,21 @@ function paintCookedChicken(ctx: CanvasRenderingContext2D): void {
   ctx.fillRect(7, 8, 2, 1);
 }
 
+/** 面包：金黄长条 + 烤色裂纹 */
+function paintBread(ctx: CanvasRenderingContext2D): void {
+  ctx.fillStyle = '#c8873a';
+  ctx.fillRect(3, 6, 11, 6);
+  ctx.fillRect(4, 5, 9, 1);
+  ctx.fillStyle = '#e0a850';
+  ctx.fillRect(4, 6, 9, 2);
+  ctx.fillStyle = '#a06828';
+  ctx.fillRect(5, 7, 1, 3);
+  ctx.fillRect(8, 7, 1, 3);
+  ctx.fillRect(11, 7, 1, 3);
+  ctx.fillStyle = '#8a5420';
+  ctx.fillRect(3, 11, 11, 1);
+}
+
 export const FOODS = {
   porkchop: makeFood('porkchop', '生猪排', 3, paintPorkchop),
   rotten_flesh: makeFood('rotten_flesh', '腐肉', 4, paintRottenFlesh),
@@ -159,6 +174,7 @@ export const FOODS = {
   cooked_beef: makeFood('cooked_beef', '牛排', 8, paintCookedBeef),
   chicken: makeFood('chicken', '生鸡肉', 2, paintChickenFood),
   cooked_chicken: makeFood('cooked_chicken', '熟鸡肉', 6, paintCookedChicken),
+  bread: makeFood('bread', '面包', 5, paintBread),
 } as const;
 
 export type FoodId = keyof typeof FOODS;

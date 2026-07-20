@@ -1,0 +1,17 @@
+{
+  "comment": "火把：细长立杆（2/16 宽、10/16 高），置于方块中央",
+  "elements": [
+    {
+      "from": [7, 0, 7],
+      "to": [9, 10, 9],
+      "faces": {
+        "down": { "texture": "#torch", "cullface": "down" },
+        "up": { "texture": "#torch" },
+        "north": { "texture": "#torch" },
+        "south": { "texture": "#torch" },
+        "west": { "texture": "#torch" },
+        "east": { "texture": "#torch" }
+      }
+    }
+  ]
+}

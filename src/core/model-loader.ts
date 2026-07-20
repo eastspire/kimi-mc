@@ -45,6 +45,10 @@ export interface BlockSpec {
   fluid?: boolean;
   cullSame?: boolean;
   replaceable?: boolean;
+  /** 重力方块（沙子/沙砾）：下方无支撑时转为下落实体 */
+  falling?: boolean;
+  /** 水位等级 0..8：0=水源（满格），1..7=水平扩散逐级下沉，8=竖直下落水柱 */
+  waterLevel?: number;
 }
 
 export interface BlocksFile {
@@ -81,6 +85,10 @@ export interface BlockDef {
   renderLayer: 'solid' | 'cutout' | 'translucent';
   hardness: number;      // <0 不可破坏，0 瞬间破坏
   luminance: number;
+  /** 重力方块（沙子/沙砾） */
+  falling: boolean;
+  /** 水位等级 0..8；非流体为 0。fluid=true 时 0=水源、1..7=扩散、8=下落柱 */
+  waterLevel: number;
   fullCube: boolean;     // 单元素 16^3 六面 → 走贪心合并快路径
   faceTiles: Partial<Record<FaceName, number>>;
   elements: ElementDef[];
@@ -191,6 +199,8 @@ export async function loadBlocks(
       renderLayer,
       hardness: spec.hardness ?? 1,
       luminance: spec.luminance ?? 0,
+      falling: spec.falling ?? false,
+      waterLevel: fluid ? (spec.waterLevel ?? 0) : 0,
       fullCube: false,
       faceTiles: {},
       elements: [],

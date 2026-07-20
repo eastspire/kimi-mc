@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { World } from '../world/world';
 import type { Particles } from '../fx/particles';
-import { Mob, HOSTILE, SUN_BURNS, type MobKind } from './mob';
+import { Mob, HOSTILE, SUN_BURNS, CONDITIONAL_HOSTILE, type MobKind } from './mob';
 import { setMobBrightness } from './model';
 
 // ============================================================
@@ -136,7 +136,6 @@ export class MobManager {
     const bz = Math.floor(pz + Math.sin(ang) * dist);
     if (!this.world.hasChunk(Math.floor(bx / 16), Math.floor(bz / 16))) return;
 
-    const waterId = this.world.reg.id('water');
     const grassId = this.world.reg.id('grass_block');
     const leavesId = this.world.reg.id('oak_leaves');
 
@@ -146,7 +145,7 @@ export class MobManager {
       if (this.world.isSolid(bx, y + 1, bz) || this.world.isSolid(bx, y + 2, bz))
         return; // 顶面被堵（树上/悬空物下），本轮放弃
       const ground = this.world.getBlock(bx, y, bz);
-      if (ground === waterId || ground === leavesId) return;
+      if (this.world.reg.isWater(ground) || ground === leavesId) return;
       if (!HOSTILE.has(kind) && ground !== grassId) return;
       this.spawn(kind, bx + 0.5, y + 1.01, bz + 0.5);
       return;
@@ -169,10 +168,15 @@ export class MobManager {
   ): void {
     setMobBrightness(daylight);
 
-    // 追击目标分配（敌对生物）：玩家 24 格内
+    // 追击目标分配（敌对生物）：玩家 24 格内；蜘蛛白天中立（仅夜晚/黑暗处追击，MC）
+    const nightHostile = daylight < 0.55;
     for (const m of this.mobs) {
       if (!HOSTILE.has(m.kind) || m.dying) {
         m.hasTarget = false;
+        continue;
+      }
+      if (CONDITIONAL_HOSTILE.has(m.kind) && !nightHostile) {
+        m.hasTarget = false; // 蜘蛛白天中立
         continue;
       }
       const dx = px - m.x;
@@ -257,7 +261,7 @@ export class MobManager {
       this.spawnTimer = 4 + Math.random() * 4;
       const passive = daylight > 0.55;
       const PASSIVES: MobKind[] = ['pig', 'sheep', 'cow', 'chicken'];
-      const HOSTILES: MobKind[] = ['zombie', 'skeleton', 'creeper'];
+      const HOSTILES: MobKind[] = ['zombie', 'skeleton', 'creeper', 'spider'];
       const pool = passive ? PASSIVES : HOSTILES;
       const kind: MobKind = pool[Math.floor(Math.random() * pool.length)];
       const cap = passive ? MAX_PASSIVE : MAX_ZOMBIES;

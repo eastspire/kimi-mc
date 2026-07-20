@@ -12,6 +12,8 @@ export class BlockRegistry {
   readonly byId: (BlockDef | null)[] = new Array<BlockDef | null>(MAX_BLOCKS).fill(null);
   readonly byName = new Map<string, BlockDef>();
   readonly hotbar: BlockDef[] = [];
+  /** 水位等级 0..8 → 对应方块 id（无该等级则 -1）；供流体模拟与渲染查表 */
+  readonly waterByLevel: number[] = new Array<number>(9).fill(-1);
 
   constructor(defs: BlockDef[], hotbarNames: string[]) {
     for (const def of defs) {
@@ -19,6 +21,7 @@ export class BlockRegistry {
       if (this.byId[def.id]) throw new Error(`方块 id 冲突：${def.name} (${def.id})`);
       this.byId[def.id] = def;
       this.byName.set(def.name, def);
+      if (def.fluid) this.waterByLevel[def.waterLevel] = def.id;
     }
     if (!this.byId[AIR]) throw new Error('blocks.json 必须定义 id=0 的 air');
     for (const n of hotbarNames) {
@@ -38,6 +41,20 @@ export class BlockRegistry {
 
   def(id: number): BlockDef | null {
     return id > 0 && id < MAX_BLOCKS ? this.byId[id] : null;
+  }
+
+  /** 是否为任意水位的水方块 */
+  isWater(id: number): boolean {
+    const d = this.def(id);
+    return !!d && d.fluid;
+  }
+
+  /** 取某水位等级的水方块 id；缺失的等级回退到水源 */
+  waterId(level: number): number {
+    const l = Math.max(0, Math.min(8, level | 0));
+    const id = this.waterByLevel[l];
+    if (id > 0) return id;
+    return this.waterByLevel[0];
   }
 
   isSolid(id: number): boolean {

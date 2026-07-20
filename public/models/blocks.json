@@ -10,7 +10,13 @@
     "sandstone",
     "oak_log",
     "oak_leaves",
-    "glass"
+    "glass",
+    "torch",
+    "cobblestone",
+    "stone_bricks",
+    "bookshelf",
+    "pumpkin",
+    "glowstone"
   ],
   "blocks": {
     "air": {
@@ -60,7 +66,8 @@
       "textures": { "all": "sand" },
       "solid": true,
       "renderLayer": "solid",
-      "hardness": 0.5
+      "hardness": 0.5,
+      "falling": true
     },
     "sandstone": {
       "id": 5,
@@ -212,7 +219,8 @@
       "textures": { "all": "gravel" },
       "solid": true,
       "renderLayer": "solid",
-      "hardness": 0.6
+      "hardness": 0.6,
+      "falling": true
     },
     "bricks": {
       "id": 22,
@@ -320,6 +328,220 @@
       "solid": true,
       "renderLayer": "solid",
       "hardness": 0.6
+    },
+    "water_flow_1": {
+      "id": 33,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 1
+    },
+    "water_flow_2": {
+      "id": 34,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 2
+    },
+    "water_flow_3": {
+      "id": 35,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 3
+    },
+    "water_flow_4": {
+      "id": 36,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 4
+    },
+    "water_flow_5": {
+      "id": 37,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 5
+    },
+    "water_flow_6": {
+      "id": 38,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 6
+    },
+    "water_flow_7": {
+      "id": 39,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 7
+    },
+    "water_flow_8": {
+      "id": 40,
+      "display": "水",
+      "model": "block/cube_all",
+      "textures": { "all": "water_still" },
+      "solid": false,
+      "selectable": false,
+      "renderLayer": "translucent",
+      "hardness": -1,
+      "fluid": true,
+      "cullSame": true,
+      "waterLevel": 8
+    },
+    "torch": {
+      "id": 41,
+      "display": "火把",
+      "model": "block/torch",
+      "textures": { "torch": "torch" },
+      "solid": false,
+      "renderLayer": "cutout",
+      "hardness": 0,
+      "luminance": 14
+    },
+    "lapis_ore": {
+      "id": 42,
+      "display": "青金石矿石",
+      "model": "block/cube_all",
+      "textures": { "all": "lapis_ore" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 3.0
+    },
+    "redstone_ore": {
+      "id": 43,
+      "display": "红石矿石",
+      "model": "block/cube_all",
+      "textures": { "all": "redstone_ore" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 3.0,
+      "luminance": 6
+    },
+    "emerald_ore": {
+      "id": 44,
+      "display": "绿宝石矿石",
+      "model": "block/cube_all",
+      "textures": { "all": "emerald_ore" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 3.0
+    },
+    "farmland": {
+      "id": 45,
+      "display": "耕地",
+      "model": "block/cube_top",
+      "textures": { "top": "farmland", "side": "dirt", "bottom": "dirt" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 0.6
+    },
+    "wheat_0": { "id": 46, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_0" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "wheat_1": { "id": 47, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_1" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "wheat_2": { "id": 48, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_2" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "wheat_3": { "id": 49, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_3" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "wheat_4": { "id": 50, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_4" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "wheat_5": { "id": 51, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_5" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "wheat_6": { "id": 52, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_6" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "wheat_7": { "id": 53, "display": "小麦", "model": "block/cross", "textures": { "cross": "wheat_7" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "pumpkin": {
+      "id": 54,
+      "display": "南瓜",
+      "model": "block/cube",
+      "textures": { "up": "pumpkin_top", "down": "pumpkin_top", "north": "pumpkin_face", "south": "pumpkin_side", "west": "pumpkin_side", "east": "pumpkin_side" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 1.0
+    },
+    "melon": {
+      "id": 55,
+      "display": "西瓜",
+      "model": "block/cube_top",
+      "textures": { "top": "melon_top", "side": "melon_side", "bottom": "melon_side" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 1.0
+    },
+    "cactus": {
+      "id": 56,
+      "display": "仙人掌",
+      "model": "block/cube_top",
+      "textures": { "top": "cactus_top", "side": "cactus_side", "bottom": "cactus_top" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 0.4
+    },
+    "sugarcane": {
+      "id": 57,
+      "display": "甘蔗",
+      "model": "block/cross",
+      "textures": { "cross": "sugarcane" },
+      "solid": false,
+      "renderLayer": "cutout",
+      "hardness": 0,
+      "replaceable": true
+    },
+    "bookshelf": {
+      "id": 58,
+      "display": "书架",
+      "model": "block/cube_top",
+      "textures": { "top": "planks", "side": "bookshelf", "bottom": "planks" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 1.5
+    },
+    "mossy_cobble": {
+      "id": 59,
+      "display": "苔石",
+      "model": "block/cube_all",
+      "textures": { "all": "mossy_cobble" },
+      "solid": true,
+      "renderLayer": "solid",
+      "hardness": 2.0
     }
   }
 }

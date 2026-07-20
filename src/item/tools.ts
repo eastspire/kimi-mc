@@ -15,13 +15,15 @@ export interface ToolDef {
   /** 挖掘速度倍率（徒手 1，木 2，石 4） */
   speed: number;
   /** 工具类型；material 无挖掘加成 */
-  kind: 'pickaxe' | 'axe' | 'material';
-  /** 层级：0 手/材料，1 木，2 石，3 铁（用于矿物采集判定） */
+  kind: 'pickaxe' | 'axe' | 'shovel' | 'sword' | 'hoe' | 'material';
+  /** 层级：0 手/材料，1 木，2 石，3 铁，4 钻（用于矿物采集判定） */
   tier: number;
   /** 是否可 64 堆叠（木棍/材料 true，工具 false） */
   stackable: boolean;
-  /** 最大耐久（MC：木 59、石 131、铁 250；材料 0 无耐久） */
+  /** 最大耐久（MC：木 59、石 131、铁 250、钻 1561；材料 0 无耐久） */
   maxDurability: number;
+  /** 近战攻击伤害（心 ×2 = 半心单位）；缺省为 1（等同徒手） */
+  melee?: number;
 }
 
 function makeTool(
@@ -33,6 +35,7 @@ function makeTool(
   stackable: boolean,
   maxDurability: number,
   paint: (ctx: CanvasRenderingContext2D) => void,
+  melee?: number,
 ): ToolDef {
   const sprite = document.createElement('canvas');
   sprite.width = 16;
@@ -45,7 +48,7 @@ function makeTool(
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
   texture.colorSpace = THREE.SRGBColorSpace;
-  return { id, name, sprite, texture, speed, kind, tier, stackable, maxDurability };
+  return { id, name, sprite, texture, speed, kind, tier, stackable, maxDurability, melee };
 }
 
 /** 斜柄：从 (5,4) 到 (10,13) 的对角 2px 木柄 */
@@ -77,6 +80,44 @@ function paintAxeHead(ctx: CanvasRenderingContext2D, main: string, dark: string)
   ctx.fillRect(2, 1, 1, 5);
   ctx.fillRect(2, 6, 1, 2);
   ctx.fillRect(7, 4, 1, 2);
+}
+
+/** 锹头：顶部方形铲面 + 中央高光 */
+function paintShovelHead(ctx: CanvasRenderingContext2D, main: string, dark: string): void {
+  ctx.fillStyle = main;
+  ctx.fillRect(4, 1, 5, 5);
+  ctx.fillStyle = dark;
+  ctx.fillRect(4, 5, 5, 1);
+  ctx.fillRect(4, 1, 1, 5);
+  ctx.fillStyle = '#ffffff44';
+  ctx.fillRect(5, 2, 2, 2);
+}
+
+/** 剑：从 (4,12) 柄到 (12,4) 的斜刃 + 护手 */
+function paintSword(ctx: CanvasRenderingContext2D, blade: string, dark: string): void {
+  // 斜刃（对角线 2px 宽）
+  for (let i = 0; i < 8; i++) {
+    ctx.fillStyle = i % 2 ? blade : dark;
+    ctx.fillRect(6 + i, 8 - i, 2, 2);
+  }
+  // 护手（横向）
+  ctx.fillStyle = dark;
+  ctx.fillRect(4, 9, 5, 2);
+  // 柄
+  ctx.fillStyle = '#8a5a2b';
+  ctx.fillRect(3, 11, 3, 3);
+  ctx.fillStyle = '#6e4423';
+  ctx.fillRect(3, 13, 3, 1);
+}
+
+/** 锄头：柄 + 顶部横向弯钩 */
+function paintHoe(ctx: CanvasRenderingContext2D, main: string, dark: string): void {
+  ctx.fillStyle = main;
+  ctx.fillRect(2, 1, 7, 2);
+  ctx.fillRect(2, 3, 2, 3);
+  ctx.fillStyle = dark;
+  ctx.fillRect(2, 5, 2, 1);
+  ctx.fillRect(8, 1, 1, 2);
 }
 
 function paintStick(ctx: CanvasRenderingContext2D): void {
@@ -203,27 +244,27 @@ export const TOOLS: Record<string, ToolDef> = {
   wooden_pickaxe: makeTool('wooden_pickaxe', '木镐', 2, 'pickaxe', 1, false, 59, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintPickHead(c, WOOD_MAIN, WOOD_DARK);
-  }),
+  }, 2),
   wooden_axe: makeTool('wooden_axe', '木斧', 2, 'axe', 1, false, 59, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintAxeHead(c, WOOD_MAIN, WOOD_DARK);
-  }),
+  }, 3),
   stone_pickaxe: makeTool('stone_pickaxe', '石镐', 4, 'pickaxe', 2, false, 131, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintPickHead(c, STONE_MAIN, STONE_DARK);
-  }),
+  }, 3),
   stone_axe: makeTool('stone_axe', '石斧', 4, 'axe', 2, false, 131, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintAxeHead(c, STONE_MAIN, STONE_DARK);
-  }),
+  }, 4),
   iron_pickaxe: makeTool('iron_pickaxe', '铁镐', 6, 'pickaxe', 3, false, 250, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintPickHead(c, '#d8d8d8', '#a8a8a8');
-  }),
+  }, 3),
   iron_axe: makeTool('iron_axe', '铁斧', 6, 'axe', 3, false, 250, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintAxeHead(c, '#d8d8d8', '#a8a8a8');
-  }),
+  }, 5),
   // ---- 材料（烧炼产物/燃料，可堆叠） ----
   coal: makeTool('coal', '煤', 1, 'material', 0, true, 0, paintCoal),
   iron_ingot: makeTool('iron_ingot', '铁锭', 1, 'material', 0, true, 0, paintIngot('#d8d8d8', '#ffffff', '#a8a8a8')),
@@ -251,11 +292,11 @@ export const TOOLS: Record<string, ToolDef> = {
   diamond_pickaxe: makeTool('diamond_pickaxe', '钻石镐', 8, 'pickaxe', 4, false, 1561, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintPickHead(c, '#4ee8d8', '#2ec8b8');
-  }),
+  }, 4),
   diamond_axe: makeTool('diamond_axe', '钻石斧', 8, 'axe', 4, false, 1561, (c) => {
     paintHandle(c, HANDLE_1, HANDLE_2);
     paintAxeHead(c, '#4ee8d8', '#2ec8b8');
-  }),
+  }, 5),
   // ---- 弓（不可堆叠，MC 耐久 385）；kind 归 material（无挖掘加成），按 id 识别 ----
   bow: makeTool('bow', '弓', 1, 'material', 0, false, 385, (c) => {
     c.fillStyle = '#8a5a2b';
@@ -271,6 +312,77 @@ export const TOOLS: Record<string, ToolDef> = {
     c.fillStyle = '#d8d8d0';
     c.fillRect(7, 2, 1, 12);
   }),
+  // ---- 锹（泥土/沙/沙砾/雪/黏土加速；MC melee 木2.5/石3.5/铁4.5/钻5.5） ----
+  wooden_shovel: makeTool('wooden_shovel', '木锹', 2, 'shovel', 1, false, 59, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintShovelHead(c, WOOD_MAIN, WOOD_DARK); }, 2),
+  stone_shovel: makeTool('stone_shovel', '石锹', 4, 'shovel', 2, false, 131, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintShovelHead(c, STONE_MAIN, STONE_DARK); }, 3),
+  iron_shovel: makeTool('iron_shovel', '铁锹', 6, 'shovel', 3, false, 250, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintShovelHead(c, '#d8d8d8', '#a8a8a8'); }, 4),
+  diamond_shovel: makeTool('diamond_shovel', '钻石锹', 8, 'shovel', 4, false, 1561, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintShovelHead(c, '#4ee8d8', '#2ec8b8'); }, 5),
+  // ---- 剑（近战武器；MC 伤害 木4/石5/铁6/钻7 = 2×半心） ----
+  wooden_sword: makeTool('wooden_sword', '木剑', 1, 'sword', 1, false, 59, (c) => paintSword(c, WOOD_MAIN, WOOD_DARK), 4),
+  stone_sword: makeTool('stone_sword', '石剑', 1, 'sword', 2, false, 131, (c) => paintSword(c, STONE_MAIN, STONE_DARK), 5),
+  iron_sword: makeTool('iron_sword', '铁剑', 1, 'sword', 3, false, 250, (c) => paintSword(c, '#e8e8e8', '#b8b8b8'), 6),
+  diamond_sword: makeTool('diamond_sword', '钻石剑', 1, 'sword', 4, false, 1561, (c) => paintSword(c, '#6ef5e8', '#3ec8b8'), 7),
+  gold_sword: makeTool('gold_sword', '金剑', 1, 'sword', 2, false, 32, (c) => paintSword(c, '#f9e14e', '#d4af37'), 4),
+  // ---- 锄（开垦耕地；melee 1，无挖掘加成） ----
+  wooden_hoe: makeTool('wooden_hoe', '木锄', 1, 'hoe', 1, false, 59, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintHoe(c, WOOD_MAIN, WOOD_DARK); }),
+  stone_hoe: makeTool('stone_hoe', '石锄', 1, 'hoe', 2, false, 131, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintHoe(c, STONE_MAIN, STONE_DARK); }),
+  iron_hoe: makeTool('iron_hoe', '铁锄', 1, 'hoe', 3, false, 250, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintHoe(c, '#d8d8d8', '#a8a8a8'); }),
+  diamond_hoe: makeTool('diamond_hoe', '钻石锄', 1, 'hoe', 4, false, 1561, (c) => { paintHandle(c, HANDLE_1, HANDLE_2); paintHoe(c, '#4ee8d8', '#2ec8b8'); }),
+  // ---- 线（蜘蛛掉落，弓/钓竿材料，可堆叠） ----
+  string: makeTool('string', '线', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#e8e8e8';
+    for (let i = 0; i < 12; i++) c.fillRect(2 + i, 12 - i, 1, 1);
+    c.fillStyle = '#c8c8c8';
+    c.fillRect(3, 12, 2, 1); c.fillRect(11, 3, 2, 1); c.fillRect(6, 8, 1, 2);
+  }),
+  // ---- 青金石/红石/绿宝石（矿石掉落材料，可堆叠） ----
+  lapis_lazuli: makeTool('lapis_lazuli', '青金石', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#2a4ac8';
+    c.fillRect(4, 6, 8, 6); c.fillRect(5, 5, 6, 1);
+    c.fillStyle = '#4a6ae8';
+    c.fillRect(5, 7, 3, 2); c.fillRect(9, 9, 2, 2);
+    c.fillStyle = '#1a34a8';
+    c.fillRect(4, 11, 8, 1);
+  }),
+  redstone: makeTool('redstone', '红石', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#c82828';
+    c.fillRect(4, 8, 8, 4); c.fillRect(5, 6, 6, 2); c.fillRect(6, 5, 4, 1);
+    c.fillStyle = '#f04838';
+    c.fillRect(5, 8, 2, 2); c.fillRect(9, 7, 2, 2); c.fillRect(7, 6, 1, 1);
+    c.fillStyle = '#8a1818';
+    c.fillRect(4, 11, 8, 1);
+  }),
+  emerald: makeTool('emerald', '绿宝石', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#2ac84a';
+    c.fillRect(6, 4, 4, 2); c.fillRect(5, 6, 6, 3); c.fillRect(6, 9, 4, 2); c.fillRect(7, 11, 2, 1);
+    c.fillStyle = '#6ae88a';
+    c.fillRect(6, 5, 2, 1);
+  }),
+  // ---- 骨粉（骨头合成，催熟作物） ----
+  bone_meal: makeTool('bone_meal', '骨粉', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#e8e8e0';
+    c.fillRect(4, 5, 8, 7);
+    c.fillRect(5, 4, 6, 1);
+    c.fillStyle = '#f8f8f0';
+    c.fillRect(5, 6, 3, 2); c.fillRect(9, 9, 2, 2);
+    c.fillStyle = '#c8c8c0';
+    c.fillRect(4, 11, 8, 1); c.fillRect(10, 6, 1, 1);
+  }),
+  // ---- 小麦（收获物，合成面包） ----
+  wheat_item: makeTool('wheat_item', '小麦', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#c8a83a';
+    for (let i = 0; i < 9; i++) c.fillRect(7, 13 - i, 2, 1);
+    c.fillStyle = '#e8c84a';
+    c.fillRect(6, 3, 4, 2); c.fillRect(7, 1, 2, 2); c.fillRect(6, 5, 1, 1); c.fillRect(9, 5, 1, 1);
+  }),
+  // ---- 小麦种子（打草掉落，种植用） ----
+  wheat_seeds: makeTool('wheat_seeds', '小麦种子', 1, 'material', 0, true, 0, (c) => {
+    c.fillStyle = '#7a9a3a';
+    c.fillRect(5, 10, 2, 2); c.fillRect(9, 9, 2, 2); c.fillRect(7, 12, 2, 2); c.fillRect(10, 12, 1, 1);
+    c.fillStyle = '#5d9433';
+    c.fillRect(7, 6, 2, 5);
+    c.fillRect(5, 7, 2, 1); c.fillRect(9, 8, 2, 1);
+  }),
 };
 
 export function toolById(id: string): ToolDef | null {
@@ -280,18 +392,38 @@ export function toolById(id: string): ToolDef | null {
 // ---------------- 挖掘规则 ----------------
 
 /** 方块适用工具：手持对应 kind 的工具才获得速度加成 */
-export const BLOCK_TOOL: Record<string, 'pickaxe' | 'axe'> = {
+export const BLOCK_TOOL: Record<string, 'pickaxe' | 'axe' | 'shovel' | 'sword'> = {
   stone: 'pickaxe',
   cobblestone: 'pickaxe',
   coal_ore: 'pickaxe',
   iron_ore: 'pickaxe',
   gold_ore: 'pickaxe',
   diamond_ore: 'pickaxe',
+  lapis_ore: 'pickaxe',
+  redstone_ore: 'pickaxe',
+  emerald_ore: 'pickaxe',
   obsidian: 'pickaxe',
+  stone_bricks: 'pickaxe',
+  bricks: 'pickaxe',
+  mossy_cobble: 'pickaxe',
+  furnace: 'pickaxe',
   oak_log: 'axe',
   oak_planks: 'axe',
   crafting_table: 'axe',
-  furnace: 'pickaxe',
+  bookshelf: 'axe',
+  pumpkin: 'axe',
+  melon: 'axe',
+  dirt: 'shovel',
+  grass_block: 'shovel',
+  sand: 'shovel',
+  gravel: 'shovel',
+  clay: 'shovel',
+  snow_block: 'shovel',
+  farmland: 'shovel',
+  oak_leaves: 'sword',
+  white_wool: 'sword',
+  cactus: 'sword',
+  sugarcane: 'sword',
 };
 
 /**
@@ -303,8 +435,11 @@ export const HARVEST_TIER: Record<string, number> = {
   cobblestone: 1,
   coal_ore: 1,
   iron_ore: 2,
+  lapis_ore: 2,
   gold_ore: 3,
   diamond_ore: 3,
+  redstone_ore: 3,
+  emerald_ore: 3,
   obsidian: 4,
   furnace: 1,
 };

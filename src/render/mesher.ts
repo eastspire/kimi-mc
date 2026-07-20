@@ -21,6 +21,13 @@ const pidx = (x: number, y: number, z: number): number =>
 const AO_CURVE = [0.55, 0.7, 0.85, 1.0];
 const WATER_DROP = 2 / 16; // 水面下沉
 
+/** 水位 0..8 → 顶面高度（方块内 0..1）。0=水源满格下沉 1/8，1..7 逐级降低，8=下落柱满格 */
+function waterTopFor(level: number): number {
+  if (level <= 0) return 1 - WATER_DROP; // 水源：满格略降，避免相邻水面 z-fight
+  if (level >= 8) return 1; // 下落水柱：满格
+  return (8 - level) / 9; // 扩散水：1 级≈0.78 … 7 级≈0.11
+}
+
 export interface MeshArrays {
   positions: number[];
   uvs: number[];
@@ -285,6 +292,8 @@ function pushQuad(
   ao: readonly number[],
   lowerTop: boolean,
   lv: readonly number[] = NO_LIGHT,
+  /** 顶面绝对高度（方块内 0..1，仅 lowerTop 为 true 时生效）；缺省为旧的水面下沉行为 */
+  topHeight?: number,
 ): void {
   const base = arr.positions.length / 3;
   const maxY = Math.max(
@@ -295,7 +304,13 @@ function pushQuad(
   );
   for (let k = 0; k < 4; k++) {
     let [cx, cy, cz] = corners[k];
-    if (lowerTop && corners[k][1] === maxY) cy -= WATER_DROP;
+    if (lowerTop && corners[k][1] === maxY) {
+      // topHeight 为相对块底(0..1)的水面高度；maxY-1 即块底世界 y（up 面 maxY=s+1）
+      cy =
+        topHeight !== undefined
+          ? maxY - 1 + topHeight
+          : cy - WATER_DROP;
+    }
     arr.positions.push(cx, cy, cz);
     arr.uvs.push(uvs[k][0], uvs[k][1]);
     arr.tiles.push(tile);
@@ -489,7 +504,13 @@ export function buildChunkMesh(
             if (rdef) {
               if (def.cullSame && rid === id) continue;
               else if (rdef.occludes) continue;
-              else if (rdef.fluid && def.fluid) continue;
+              // 水-水相邻：仅当邻居水位不高于当前（邻居水面不低于本格）才剔除共享面，
+              // 否则保留侧面以呈现水位落差；顶面（up）不受此限，由 waterCode 单独处理
+              else if (rdef.fluid && def.fluid) {
+                const sameTop =
+                  dir.name === 'up' || rdef.waterLevel <= def.waterLevel;
+                if (sameTop) continue;
+              }
             }
             const tile = def.faceTiles[dir.name];
             if (tile === undefined) continue;
@@ -529,9 +550,15 @@ export function buildChunkMesh(
                 }
               }
             }
-            const topFlag = bucket === 1 && rawAt(x, y + 1, z) !== id ? 1 : 0;
-            mask[u + W * v] =
-              (tile + 1) | (ao << 5) | (topFlag << 13) | (lpk << 14);
+            // 水位编码（仅透明桶/水）：上方非水时记录 level+1（1..9），0=非暴露水面。
+            // 透明桶不计算 AO/光照（doAo/doLight 仅 bucket 0），故复用光照位段存水位，无位溢出。
+            let waterCode = 0;
+            if (bucket === 1 && def.fluid && rawAt(x, y + 1, z) !== id) {
+              waterCode = def.waterLevel + 1;
+            }
+            // 掩码布局：(tile+1)5b | ao8b<<5 | light16b<<13；透明桶 light 段存 waterCode
+            const hi = bucket === 1 ? waterCode : lpk;
+            mask[u + W * v] = (tile + 1) | (ao << 5) | (hi << 13);
           }
         }
         // 贪心扩展矩形
@@ -559,8 +586,13 @@ export function buildChunkMesh(
               (aoPacked >> 4) & 3,
               (aoPacked >> 6) & 3,
             ];
-            const lowerTop = bucket === 1 && ((val >> 13) & 1) === 1;
-            const lpk = (val >> 14) & 0xffff;
+            const hi = (val >> 13) & 0xffff;
+            // 透明桶：hi 段为水位码；不透明桶：hi 段为逐角光照
+            const waterCode = bucket === 1 ? hi : 0;
+            const lowerTop = bucket === 1 && waterCode > 0;
+            const topH =
+              waterCode > 0 ? waterTopFor(waterCode - 1) : undefined;
+            const lpk = bucket === 0 ? hi : 0;
             const lv = [
               lpk & 15,
               (lpk >> 4) & 15,
@@ -576,6 +608,7 @@ export function buildChunkMesh(
               ao,
               lowerTop,
               lv,
+              topH,
             );
           }
         }

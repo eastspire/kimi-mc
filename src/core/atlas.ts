@@ -49,6 +49,29 @@ export const TILE_NAMES = [
   'tnt_side',
   'tnt_top',
   'tnt_bottom',
+  'torch',
+  'lapis_ore',
+  'redstone_ore',
+  'emerald_ore',
+  'farmland',
+  'wheat_0',
+  'wheat_1',
+  'wheat_2',
+  'wheat_3',
+  'wheat_4',
+  'wheat_5',
+  'wheat_6',
+  'wheat_7',
+  'pumpkin_side',
+  'pumpkin_top',
+  'pumpkin_face',
+  'melon_side',
+  'melon_top',
+  'cactus_side',
+  'cactus_top',
+  'sugarcane',
+  'bookshelf',
+  'mossy_cobble',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -503,7 +526,10 @@ const paintCraftingSide: Painter = (ctx, _ox, _oy, rnd) => {
 };
 
 /** 熔炉侧/顶面基底：灰色石板 + 深色描边 */
-function paintFurnaceBase(ctx: CanvasRenderingContext2D, rnd: () => number): void {
+function paintFurnaceBase(
+  ctx: CanvasRenderingContext2D,
+  rnd: () => number,
+): void {
   speckle(ctx, rnd, '#7d7d7d', ['#757575', '#858585', '#6f6f6f'], 0.3);
   for (let i = 0; i < 16; i++) {
     px(ctx, i, 0, '#5a5a5a');
@@ -524,8 +550,10 @@ const paintFurnaceTop: Painter = (ctx, _ox, _oy, rnd) => {
 /** 熔炉正面：石板底 + 深色炉口 + 底部火槽 */
 const paintFurnaceFront: Painter = (ctx, _ox, _oy, rnd) => {
   paintFurnaceBase(ctx, rnd);
-  for (let y = 5; y <= 10; y++) for (let x = 4; x <= 11; x++) px(ctx, x, y, '#2a2a2a');
-  for (let y = 6; y <= 9; y++) for (let x = 5; x <= 10; x++) px(ctx, x, y, '#141414');
+  for (let y = 5; y <= 10; y++)
+    for (let x = 4; x <= 11; x++) px(ctx, x, y, '#2a2a2a');
+  for (let y = 6; y <= 9; y++)
+    for (let x = 5; x <= 10; x++) px(ctx, x, y, '#141414');
   for (let x = 5; x <= 10; x++) px(ctx, x, 12, '#3a3a3a');
   px(ctx, 5, 13, '#2a2a2a');
   px(ctx, 10, 13, '#2a2a2a');
@@ -556,6 +584,182 @@ const paintWool: Painter = (ctx, _ox, _oy, rnd) => {
   speckle(ctx, rnd, '#e8e8e8', ['#dcdcdc', '#f4f4f4', '#d0d0d0'], 0.3);
   for (let i = 2; i < 16; i += 4)
     for (let j = 0; j < 16; j++) px(ctx, j, i, '#d4d4d4');
+};
+
+/** 火把：透明底 + 竖直木柄 + 顶部火焰（亮黄→橙） */
+const paintTorch: Painter = (ctx, _ox, _oy, rnd) => {
+  ctx.clearRect(0, 0, 16, 16);
+  // 木柄（中央 2px 宽）
+  for (let y = 6; y < 16; y++) {
+    px(ctx, 7, y, y % 2 ? '#6b5433' : '#7d6a42');
+    px(ctx, 8, y, y % 2 ? '#7d6a42' : '#57422a');
+  }
+  // 火焰芯
+  for (let y = 2; y < 7; y++) {
+    for (let x = 6; x < 10; x++) {
+      const edge = x === 6 || x === 9 || y === 2;
+      px(ctx, x, y, edge ? '#e8942a' : '#ffd84a');
+    }
+  }
+  px(ctx, 7, 1, '#e8942a');
+  px(ctx, 8, 1, '#ffedaa');
+  // 火光高光
+  if (rnd() < 1) px(ctx, 7, 3, '#fff6c0');
+};
+
+/** 耕地：深棕土 + 横向犁沟 */
+const paintFarmland: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#5a3d24', ['#4e3420', '#66452a', '#452c1a'], 0.5);
+  for (const y of [3, 7, 11, 15]) {
+    for (let x = 0; x < 16; x++) px(ctx, x, y, '#3a2614');
+  }
+  for (const y of [4, 8, 12]) {
+    for (let x = 0; x < 16; x++) if (rnd() < 0.5) px(ctx, x, y, '#6e4c2e');
+  }
+};
+
+/** 小麦阶段 0..7：幼苗由小到大，末阶段金黄穗 */
+function paintWheat(stage: number): Painter {
+  return (ctx, _ox, _oy, rnd) => {
+    ctx.clearRect(0, 0, 16, 16);
+    const mature = stage >= 7;
+    const stalk = mature ? '#c8a83a' : '#5d9433';
+    const head = mature ? '#e8c84a' : '#7cbc4b';
+    const h = 2 + stage * 2; // 株高随阶段
+    for (let p = 0; p < 4; p++) {
+      const x = 2 + p * 4;
+      for (let s = 0; s < h; s++) px(ctx, x, 15 - s, stalk);
+      // 顶部穗/叶
+      if (stage >= 3) {
+        for (let e = 0; e < 2 + (stage >> 1); e++) {
+          px(ctx, x, 15 - h - e, head);
+          if (stage >= 5 && rnd() < 0.6) px(ctx, x + 1, 15 - h - e, head);
+        }
+      } else {
+        px(ctx, x, 15 - h, head);
+      }
+    }
+  };
+}
+
+/** 南瓜侧：橙底竖棱 + 深橙沟 */
+const paintPumpkinSide: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#c87818', ['#b86e12', '#d4821f', '#a86410'], 0.4);
+  for (const x of [3, 7, 11, 15]) {
+    for (let y = 0; y < 16; y++) px(ctx, x, y, '#9a5c0e');
+  }
+};
+/** 南瓜顶：橙底 + 中央茎 */
+const paintPumpkinTop: Painter = (ctx, _ox, _oy, rnd) => {
+  paintPumpkinSide(ctx, _ox, _oy, rnd);
+  ctx.fillStyle = '#5a6a20';
+  ctx.fillRect(7, 7, 2, 3);
+  px(ctx, 7, 6, '#4a5a18');
+};
+/** 南瓜脸（雕刻）：南瓜侧 + 黑色三角眼 + 锯齿嘴 */
+const paintPumpkinFace: Painter = (ctx, _ox, _oy, rnd) => {
+  paintPumpkinSide(ctx, _ox, _oy, rnd);
+  const dark = '#2a1808';
+  // 左眼
+  px(ctx, 4, 6, dark);
+  px(ctx, 5, 6, dark);
+  px(ctx, 4, 7, dark);
+  // 右眼
+  px(ctx, 10, 6, dark);
+  px(ctx, 11, 6, dark);
+  px(ctx, 11, 7, dark);
+  // 鼻
+  px(ctx, 7, 9, dark);
+  px(ctx, 8, 9, dark);
+  // 锯齿嘴
+  for (const [x, y] of [
+    [4, 12],
+    [5, 12],
+    [6, 13],
+    [7, 12],
+    [8, 12],
+    [9, 13],
+    [10, 12],
+    [11, 12],
+  ] as const)
+    px(ctx, x, y, dark);
+};
+/** 西瓜侧：深绿底 + 浅绿竖纹 */
+const paintMelonSide: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#5a8a24', ['#527d20', '#649428', '#4a731c'], 0.4);
+  for (const x of [2, 6, 10, 14]) {
+    for (let y = 0; y < 16; y++) if (rnd() < 0.8) px(ctx, x, y, '#7aa83a');
+  }
+};
+const paintMelonTop: Painter = (ctx, _ox, _oy, rnd) => {
+  paintMelonSide(ctx, _ox, _oy, rnd);
+  ctx.fillStyle = '#4a5a18';
+  ctx.fillRect(7, 7, 2, 2);
+};
+/** 仙人掌侧：绿底 + 竖棱 + 刺点 */
+const paintCactusSide: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#3f7a2a', ['#37701f', '#488a30', '#2f6519'], 0.4);
+  for (const x of [4, 8, 12]) {
+    for (let y = 0; y < 16; y++) px(ctx, x, y, '#2c5c16');
+  }
+  for (let i = 0; i < 12; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#b8d88a'); // 刺
+};
+const paintCactusTop: Painter = (ctx, _ox, _oy, rnd) => {
+  speckle(ctx, rnd, '#488a30', ['#3f7a2a', '#529a38'], 0.4);
+  for (let i = 1; i < 15; i++) {
+    px(ctx, i, 1, '#2c5c16');
+    px(ctx, i, 14, '#2c5c16');
+    px(ctx, 1, i, '#2c5c16');
+    px(ctx, 14, i, '#2c5c16');
+  }
+};
+/** 甘蔗：浅绿竹节竖条 */
+const paintSugarcane: Painter = (ctx, _ox, _oy, _rnd) => {
+  ctx.clearRect(0, 0, 16, 16);
+  for (const x of [3, 8, 13]) {
+    for (let y = 0; y < 16; y++) {
+      const joint = y % 5 === 0;
+      px(ctx, x, y, joint ? '#5a8a3a' : '#7ab84a');
+      px(ctx, x + 1, y, joint ? '#4a7a2a' : '#6aa838');
+    }
+  }
+};
+/** 书架：木板框 + 三色书脊 */
+const paintBookshelf: Painter = (ctx, _ox, _oy, rnd) => {
+  paintPlanks(ctx, _ox, _oy, rnd);
+  const spines = [
+    '#a83a2a',
+    '#2a5aa8',
+    '#3a8a3a',
+    '#c8a83a',
+    '#7a3a8a',
+    '#a86a2a',
+  ];
+  for (let shelf = 0; shelf < 2; shelf++) {
+    const y0 = 2 + shelf * 7;
+    let x = 1;
+    let si = shelf * 3;
+    while (x < 14) {
+      const w = 1 + ((rnd() * 2) | 0);
+      ctx.fillStyle = spines[si % spines.length];
+      ctx.fillRect(x, y0, w, 5);
+      x += w + (rnd() < 0.2 ? 1 : 0);
+      si++;
+    }
+    ctx.fillStyle = '#7d5f38';
+    ctx.fillRect(0, y0 + 5, 16, 1); // 隔板
+  }
+};
+/** 苔石：圆石底 + 绿色苔藓斑 */
+const paintMossyCobble: Painter = (ctx, _ox, _oy, rnd) => {
+  paintCobblestone(ctx, _ox, _oy, rnd);
+  for (let i = 0; i < 10; i++) {
+    const bx = (rnd() * 14) | 0,
+      by = (rnd() * 14) | 0;
+    ctx.fillStyle = rnd() < 0.5 ? '#5a7d2a' : '#4a6a20';
+    ctx.fillRect(bx, by, 2, 2);
+  }
 };
 
 const PAINTERS: Record<TileName, Painter> = {
@@ -636,6 +840,30 @@ const PAINTERS: Record<TileName, Painter> = {
     ctx.fillRect(0, 0, 1, 16);
     ctx.fillRect(15, 0, 1, 16);
   },
+  // ---- 新方块贴图 ----
+  torch: paintTorch,
+  lapis_ore: paintOre('#2a4ac8', '#4a6ae8'),
+  redstone_ore: paintOre('#c82828', '#f04838'),
+  emerald_ore: paintOre('#2ac84a', '#4ae86a'),
+  farmland: paintFarmland,
+  wheat_0: paintWheat(0),
+  wheat_1: paintWheat(1),
+  wheat_2: paintWheat(2),
+  wheat_3: paintWheat(3),
+  wheat_4: paintWheat(4),
+  wheat_5: paintWheat(5),
+  wheat_6: paintWheat(6),
+  wheat_7: paintWheat(7),
+  pumpkin_side: paintPumpkinSide,
+  pumpkin_top: paintPumpkinTop,
+  pumpkin_face: paintPumpkinFace,
+  melon_side: paintMelonSide,
+  melon_top: paintMelonTop,
+  cactus_side: paintCactusSide,
+  cactus_top: paintCactusTop,
+  sugarcane: paintSugarcane,
+  bookshelf: paintBookshelf,
+  mossy_cobble: paintMossyCobble,
 };
 
 // ---------- 裂纹贴图（10 阶段，程序化绘制） ----------

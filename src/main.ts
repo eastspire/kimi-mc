@@ -35,6 +35,8 @@ import { Particles } from './fx/particles';
 import { MobManager } from './mob/manager';
 import { ArrowManager } from './mob/arrows';
 import { TntManager } from './world/tnt';
+import { FluidSimulator } from './world/fluid';
+import { FallingBlockManager } from './world/falling-blocks';
 import type { MobKind } from './mob/mob';
 import { DropManager } from './item/drops';
 import { XpManager } from './item/xp';
@@ -250,6 +252,13 @@ function startGame(
         if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
         return;
       }
+      if (kind === 'spider') {
+        // 蜘蛛掉 0~2 线（MC）+ 5 经验
+        const ns = Math.floor(Math.random() * 3);
+        for (let i = 0; i < ns; i++) drops.spawnTool(TOOLS.string, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
+        return;
+      }
       const n =
         kind === 'pig'
           ? 1 + Math.floor(Math.random() * 3)
@@ -417,6 +426,7 @@ function startGame(
   );
   // ---- 熔炉：位置 → 状态；右键打开 UI，后台持续烧炼 ----
   const furnaces = new Map<string, FurnaceState>();
+  const farmlandId = registry.id('farmland');
   const getFurnace = (x: number, y: number, z: number): FurnaceState => {
     const key = `${x},${y},${z}`;
     let st = furnaces.get(key);
@@ -469,7 +479,6 @@ function startGame(
       onClose: () => controls.lock(),
     },
   );
-  const waterId = registry.id('water');
 
   // ---- 目标方块高亮 + 裂纹 ----
   const highlight = new THREE.LineSegments(
@@ -509,6 +518,7 @@ function startGame(
   let underwater = false;
   let eatTimer = 0;
   let nextCrunch = 0.4;
+  let growTimer = 0; // 作物随机 tick 节流
   let bowCharge = 0; // 弓蓄力进度（秒，>0 表示正在拉弓）
 
   const controls = new Controls(renderer.domElement, {
@@ -796,7 +806,21 @@ function startGame(
       chunkManager.markEditedArea(edit.cx, edit.cz);
     const data = world.chunks.get(chunkKey(edit.cx, edit.cz));
     if (data) modifiedChunks.set(chunkKey(edit.cx, edit.cz), data);
+    // 唤醒流体（水位重算/扩散/消退）与重力方块（上方悬空则开始下落）
+    fluid.wake(wx, y, wz);
+    gravity.tryStart(wx, y + 1, wz);
+    gravity.tryStart(wx, y, wz);
   }
+
+  // ---- 水流动 + 重力方块（MC 物理）：与 applyEdit 闭环，方块改动即触发 ----
+  const fluid = new FluidSimulator(world, applyEdit);
+  const gravity = new FallingBlockManager(
+    scene,
+    world,
+    chunkManager.opaqueMat,
+    applyEdit,
+    (def, x, y, z) => drops.spawnBlock(def, x, y, z),
+  );
 
   /**
    * 爆炸（苦力怕 power=3 掉落 30%；TNT power=4 全掉落，MC 1.14+ 规则）：
@@ -877,6 +901,28 @@ function startGame(
     survivalInv.consumeMaterial('arrow');
   }
 
+  /** 消耗当前快捷栏格手持的可堆叠材料 1 个（种子/骨粉等）；空则清空该格 */
+  function consumeHeldMaterial(id: string): void {
+    const i = hotbar.selected;
+    const s = hotbar.slotAt(i);
+    if (s.tool && s.tool.def.id === id && s.tool.count > 0) {
+      s.tool.count--;
+      hotbar.setSlotAt(i, s.tool.count <= 0 ? emptyHotSlot() : s);
+    }
+  }
+
+  /** 4 格曼哈顿距离内是否存在水（耕地湿润判定，MC 一致） */
+  function hasWaterNear(x: number, y: number, z: number): boolean {
+    for (let dx = -4; dx <= 4; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dz = -4; dz <= 4; dz++) {
+          if (Math.abs(dx) + Math.abs(dz) > 4) continue;
+          if (registry.isWater(world.getBlock(x + dx, y + dy, z + dz)))
+            return true;
+        }
+    return false;
+  }
+
   /**
    * 放箭：蓄力 0..1 → 速度 8~32、伤害 1~9（MC 满弓 9 伤害）；
    * 生存消耗 1 箭 + 弓 1 点耐久（385 次），创造不耗箭
@@ -948,6 +994,34 @@ function startGame(
           drops.spawnTool(TOOLS.coal, x + 0.5, y + 0.5, z + 0.5);
         } else if (def.name === 'diamond_ore') {
           drops.spawnTool(TOOLS.diamond, x + 0.5, y + 0.5, z + 0.5);
+        } else if (def.name === 'lapis_ore') {
+          // 青金石掉 4~8 个
+          const n = 4 + Math.floor(Math.random() * 5);
+          drops.spawnTool(TOOLS.lapis_lazuli, x + 0.5, y + 0.5, z + 0.5, n);
+        } else if (def.name === 'redstone_ore') {
+          const n = 4 + Math.floor(Math.random() * 2);
+          drops.spawnTool(TOOLS.redstone, x + 0.5, y + 0.5, z + 0.5, n);
+        } else if (def.name === 'emerald_ore') {
+          drops.spawnTool(TOOLS.emerald, x + 0.5, y + 0.5, z + 0.5);
+        } else if (def.name === 'tall_grass') {
+          // 打草概率掉小麦种子（MC ~12.5%）
+          if (Math.random() < 0.13)
+            drops.spawnTool(TOOLS.wheat_seeds, x + 0.5, y + 0.5, z + 0.5);
+        } else if (def.name.startsWith('wheat_')) {
+          // 收获：成熟掉 1 小麦 + 0~3 种子；未熟只掉 1 种子
+          const stage = Number(def.name.slice(6));
+          if (stage >= 7) {
+            drops.spawnTool(TOOLS.wheat_item, x + 0.5, y + 0.5, z + 0.5);
+            const ns = Math.floor(Math.random() * 4);
+            if (ns > 0)
+              drops.spawnTool(TOOLS.wheat_seeds, x + 0.5, y + 0.5, z + 0.5, ns);
+          } else {
+            drops.spawnTool(TOOLS.wheat_seeds, x + 0.5, y + 0.5, z + 0.5);
+          }
+        } else if (def.name === 'farmland') {
+          // 耕地破坏掉泥土（MC 一致）
+          const dirt = registry.byName.get('dirt');
+          if (dirt) drops.spawnBlock(dirt, x + 0.5, y + 0.5, z + 0.5);
         } else {
           const dd = dropFor(def);
           if (dd) drops.spawnBlock(dd, x + 0.5, y + 0.5, z + 0.5);
@@ -1062,11 +1136,13 @@ function startGame(
     }
 
     // 攻击生物：按住连击（生物 0.5s 无敌帧限频），击退方向取视线水平分量
-    // MC：工具当武器使用每次命中 -2 耐久
+    // 近战伤害取手持工具 melee（剑 4~7，锹/斧/镐较低，徒手 1）；剑命中 -2 耐久，其他工具 -1
     if (attackHeld && mobPriority && mobHit) {
-      if (mobHit.mob.damage(tmpDir.x, tmpDir.z, 1)) {
+      const heldTool = hotbar.current.tool?.def ?? null;
+      const melee = heldTool?.melee ?? 1;
+      if (mobHit.mob.damage(tmpDir.x, tmpDir.z, melee)) {
         sfx.playHurt();
-        damageHeldTool(2);
+        damageHeldTool(heldTool?.kind === 'sword' ? 2 : 1);
       }
     }
 
@@ -1115,6 +1191,7 @@ function startGame(
     if (useHeld && useCooldown <= 0) {
       const hitDef =
         currentHit && !mobPriority ? registry.def(currentHit.block) : null;
+      const curTool = hotbar.current.tool?.def ?? null;
       if (hitDef && hitDef.name === 'crafting_table') {
         craftingTable.open();
         useCooldown = 0.3;
@@ -1133,6 +1210,56 @@ function startGame(
           currentHit!.z + 0.5,
         );
         sfx.playFuse();
+        useCooldown = 0.3;
+      } else if (
+        hitDef &&
+        (hitDef.name === 'dirt' || hitDef.name === 'grass_block') &&
+        curTool?.kind === 'hoe'
+      ) {
+        // 锄头开垦：泥土/草方块 → 耕地（MC：手持锄右键）
+        applyEdit(currentHit!.x, currentHit!.y, currentHit!.z, farmlandId);
+        damageHeldTool(1);
+        sfx.playPlace();
+        useCooldown = 0.3;
+      } else if (
+        hitDef &&
+        hitDef.name === 'farmland' &&
+        curTool?.id === 'wheat_seeds'
+      ) {
+        // 播种：耕地上方空格种 wheat_0
+        const ax = currentHit!.x;
+        const ay = currentHit!.y + 1;
+        const az = currentHit!.z;
+        if (world.getBlock(ax, ay, az) === AIR) {
+          applyEdit(ax, ay, az, registry.id('wheat_0'));
+          if (gameMode === 'survival') consumeHeldMaterial('wheat_seeds');
+          sfx.playPlace();
+        }
+        useCooldown = 0.3;
+      } else if (
+        hitDef &&
+        hitDef.name.startsWith('wheat_') &&
+        curTool?.id === 'bone_meal'
+      ) {
+        // 骨粉催熟：小麦前进 1~3 阶段
+        const stage = Number(hitDef.name.slice(6));
+        const next = Math.min(7, stage + 1 + Math.floor(Math.random() * 3));
+        applyEdit(
+          currentHit!.x,
+          currentHit!.y,
+          currentHit!.z,
+          registry.id(`wheat_${next}`),
+        );
+        if (gameMode === 'survival') consumeHeldMaterial('bone_meal');
+        particles.spawn(
+          currentHit!.x + 0.5,
+          currentHit!.y + 0.8,
+          currentHit!.z + 0.5,
+          0.6,
+          0.9,
+          0.4,
+        );
+        sfx.playPlace();
         useCooldown = 0.3;
       } else {
         placeBlock();
@@ -1331,6 +1458,10 @@ function startGame(
       // 点燃的 TNT：引信/下落/白闪，尽则经回调大爆炸（power=4）
       tntManager.update(dt);
 
+      // 水流动（节流扩散/消退）+ 重力方块坠落
+      fluid.update(dt);
+      gravity.update(dt);
+
       // 掉落物：旋转/浮动/拾取（方块/食物均可入快捷栏，满则留在原地）
       drops.update(dt, body.x, body.y + 0.9, body.z, (item) => {
         let ok = true;
@@ -1361,6 +1492,37 @@ function startGame(
         if (tickFurnace(st, dt, resolveSmeltOut)) furnaceUI.markDirty();
       }
       furnaceUI.update();
+
+      // 作物随机 tick（MC：每区块每 tick 随机抽格促生长）。节流：每 0.5s 在玩家
+      // 附近随机抽 48 格，命中小麦则按概率推进一阶段；耕地远离水会退化泥土。
+      growTimer -= dt;
+      if (growTimer <= 0) {
+        growTimer = 0.5;
+        const px0 = Math.floor(body.x);
+        const py0 = Math.floor(body.y);
+        const pz0 = Math.floor(body.z);
+        for (let n = 0; n < 48; n++) {
+          const gx = px0 + ((Math.random() * 33) | 0) - 16;
+          const gy = Math.max(1, py0 + ((Math.random() * 17) | 0) - 8);
+          const gz = pz0 + ((Math.random() * 33) | 0) - 16;
+          const gid = world.getBlock(gx, gy, gz);
+          const gdef = gid > 0 ? registry.def(gid) : null;
+          if (gdef && gdef.name.startsWith('wheat_')) {
+            const stage = Number(gdef.name.slice(6));
+            if (stage < 7 && Math.random() < 0.35) {
+              applyEdit(gx, gy, gz, registry.id(`wheat_${stage + 1}`));
+            }
+          } else if (gdef && gdef.name === 'farmland') {
+            // 退化：4 格内无水且上方非作物时，概率退回泥土（MC 干旱退化）
+            if (Math.random() < 0.02 && !hasWaterNear(gx, gy, gz)) {
+              const above = world.getBlock(gx, gy + 1, gz);
+              const adef = above > 0 ? registry.def(above) : null;
+              if (!adef || !adef.name.startsWith('wheat_'))
+                applyEdit(gx, gy, gz, registry.id('dirt'));
+            }
+          }
+        }
+      }
 
       // 进食：手持食物按住右键 1.6s（MC 进食时长），松手/切槽重置
       const curSlot = hotbar.current;
@@ -1424,11 +1586,13 @@ function startGame(
     // 水下雾：相机没入水中 → 深蓝绿短视距雾 + 清屏色；出水恢复
     const uw =
       state === 'playing' &&
-      world.getBlock(
-        Math.floor(camera.position.x),
-        Math.floor(camera.position.y),
-        Math.floor(camera.position.z),
-      ) === waterId;
+      registry.isWater(
+        world.getBlock(
+          Math.floor(camera.position.x),
+          Math.floor(camera.position.y),
+          Math.floor(camera.position.z),
+        ),
+      );
     const fog = scene.fog as THREE.Fog;
     if (uw !== underwater) {
       underwater = uw;

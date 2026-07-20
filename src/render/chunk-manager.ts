@@ -153,6 +153,14 @@ export class ChunkManager {
     patchAtlasUv(this.waterMat, this.dayUniform);
 
     this.workerDefs = defs;
+    // Worker 池懒创建：构造不立即 spawn，等首个 update() 再建池。
+    // 多维度场景下只有当前维度的 update() 会被驱动，因此非当前维度
+    // 的 ChunkManager 不占用任何 Worker，避免新世界启动瞬间起十几个 Worker 卡死。
+  }
+
+  /** 首次 update() 时创建 Worker 池（幂等） */
+  private ensureWorkers(): void {
+    if (this.workers.length > 0) return;
     const count = Math.max(
       2,
       Math.min(4, (navigator.hardwareConcurrency || 4) - 1),
@@ -384,6 +392,7 @@ export class ChunkManager {
     applyBudget: number,
     wantProgress = false,
   ): number {
+    this.ensureWorkers();
     this.ensure(px, pz);
     const now = performance.now();
 

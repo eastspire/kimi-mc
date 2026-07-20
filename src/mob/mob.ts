@@ -9,6 +9,8 @@ import {
   buildCreeperModel,
   buildSpiderModel,
   buildEndermanModel,
+  buildZombiePiglinModel,
+  buildGhastModel,
   setMobHurt,
   type MobModel,
 } from './model';
@@ -31,7 +33,9 @@ export type MobKind =
   | 'skeleton'
   | 'creeper'
   | 'spider'
-  | 'enderman';
+  | 'enderman'
+  | 'zombie_piglin'
+  | 'ghast';
 
 const GRAVITY = 27;
 const TERMINAL_VEL = -52;
@@ -60,6 +64,8 @@ const DIMS: Record<MobKind, MobDims> = {
   creeper: { half: 0.3, height: 1.7, speed: 1.3, hp: 20 },
   spider: { half: 0.7, height: 0.9, speed: 1.6, hp: 16 },
   enderman: { half: 0.3, height: 2.9, speed: 1.5, hp: 40 },
+  zombie_piglin: { half: 0.3, height: 1.95, speed: 1.3, hp: 20 },
+  ghast: { half: 2.0, height: 4.0, speed: 0.7, hp: 10 },
 };
 
 /** 腿摆动相位偏移：四足对角同相，双足左右交替 */
@@ -73,6 +79,8 @@ const LEG_PHASE: Record<MobKind, number[]> = {
   creeper: [0, Math.PI, Math.PI, 0],
   spider: [0, Math.PI, Math.PI, 0, Math.PI, 0, 0, Math.PI],
   enderman: [0, Math.PI],
+  zombie_piglin: [0, Math.PI],
+  ghast: [], // 触手由 syncModel 单独摆动
 };
 
 const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
@@ -85,6 +93,8 @@ const MODEL_BUILDER: Record<MobKind, () => MobModel> = {
   creeper: buildCreeperModel,
   spider: buildSpiderModel,
   enderman: buildEndermanModel,
+  zombie_piglin: buildZombiePiglinModel,
+  ghast: buildGhastModel,
 };
 
 /** 敌对生物（追击玩家）；骷髅/僵尸怕日晒，苦力怕/蜘蛛不怕 */
@@ -189,6 +199,10 @@ export class Mob {
 
   /** 末影人被激怒（注视/受击触发，manager 维护） */
   provoked = false;
+  /** 僵尸猪灵被激怒（受击触发群体仇恨，manager 广播） */
+  aggro = false;
+  /** 恶魂本帧吐火球（manager 消费生成火球弹） */
+  fireball = false;
 
   /** 受击：伤害 + 击退 + 红闪 + 无敌帧；返回是否真的造成了伤害 */
   damage(dirX: number, dirZ: number, dmg: number): boolean {
@@ -208,6 +222,9 @@ export class Mob {
       // 末影人受击：激怒并概率瞬移逃逸（MC：被打后常瞬走再绕回）
       this.provoked = true;
       if (Math.random() < 0.5) this.teleportNear(this.x, this.y, this.z, 8);
+    } else if (this.kind === 'zombie_piglin') {
+      // 僵尸猪灵受击：激怒（manager 广播群体仇恨）
+      this.aggro = true;
     } else if (!HOSTILE.has(this.kind)) {
       // 被动生物恐慌逃窜：朝击退反方向狂奔 2s（敌对生物不恐慌，MC 一致）
       this.panicTimer = 2;
@@ -305,14 +322,24 @@ export class Mob {
     this.attackTimer = Math.max(0, this.attackTimer - dt);
 
     // ---- 敌对追击：僵尸近身挥击 / 骷髅 10 格外停步放箭 / 苦力怕近身引爆 ----
+    // 恶魂/猪灵由各自分支处理（恶魂飞行吐弹、猪灵群体仇恨近战）
     let chasing = false;
-    if (HOSTILE.has(this.kind) && this.hasTarget) {
+    const effectiveHostile =
+      HOSTILE.has(this.kind) ||
+      (this.kind === 'ghast' && this.hasTarget) ||
+      (this.kind === 'zombie_piglin' && this.aggro && this.hasTarget);
+    if (effectiveHostile && this.hasTarget) {
       const dx = this.targetX - this.x;
       const dz = this.targetZ - this.z;
       const d = Math.hypot(dx, dz);
       const dy = Math.abs(this.targetY - this.y);
       if (d < CHASE_RANGE && dy < 10) {
-        if (this.kind === 'zombie' || this.kind === 'spider' || this.kind === 'enderman') {
+        if (
+          this.kind === 'zombie' ||
+          this.kind === 'spider' ||
+          this.kind === 'enderman' ||
+          this.kind === 'zombie_piglin'
+        ) {
           chasing = true;
           this.yaw = Math.atan2(-dx, -dz);
           if (d < ATTACK_RANGE + this.half && dy < 2.2 && this.attackTimer <= 0) {
@@ -330,6 +357,13 @@ export class Mob {
               this.teleportTimer = 2 + Math.random() * 3;
               this.teleportNear(this.targetX, this.targetY, this.targetZ, 4);
             }
+          }
+        } else if (this.kind === 'ghast') {
+          // 恶魂：面向玩家徘徊，20 格内周期吐火球（MC）
+          this.yaw = Math.atan2(-dx, -dz);
+          if (this.attackTimer <= 0 && d < 20 && dy < 12) {
+            this.attackTimer = 3 + Math.random() * 2;
+            this.fireball = true;
           }
         } else if (this.kind === 'skeleton') {
           this.yaw = Math.atan2(-dx, -dz);
@@ -397,7 +431,44 @@ export class Mob {
       }
     }
 
-    // ---- 垂直：水中上浮，陆上重力 ----
+    // ---- 垂直：恶魂悬浮漂移；水中上浮；陆上重力 ----
+    if (this.kind === 'ghast') {
+      // 恶魂：无重力。交战时盘旋于玩家上方并缓慢逼近；平时随机缓慢漂移
+      if (this.hasTarget) {
+        const dx = this.targetX - this.x;
+        const dz = this.targetZ - this.z;
+        const d = Math.hypot(dx, dz) || 1;
+        this.vx = (dx / d) * this.speed;
+        this.vz = (dz / d) * this.speed;
+        this.vy = Math.max(-1.2, Math.min(1.2, (this.targetY + 6 - this.y) * 0.6));
+      } else {
+        // 游荡：借共用 aiTimer 切换漂移方向
+        this.aiTimer -= dt;
+        if (this.aiTimer <= 0) {
+          this.aiTimer = 2 + Math.random() * 3;
+          this.walking = Math.random() < 0.7;
+          this.yaw = Math.random() * Math.PI * 2;
+        }
+        if (this.walking) {
+          this.vx = -Math.sin(this.yaw) * this.speed;
+          this.vz = -Math.cos(this.yaw) * this.speed;
+        } else {
+          this.vx = 0;
+          this.vz = 0;
+        }
+        this.vy = Math.sin(this.walkPhase * 0.5) * 0.5;
+      }
+      this.moveAxis('x', this.vx * dt);
+      this.moveAxis('z', this.vz * dt);
+      this.moveAxis('y', this.vy * dt);
+      this.onGround = false;
+      this.walkPhase += dt * 2; // 触手摆动 + 悬浮正弦用
+      if (this.y < -16) {
+        this.y = 100;
+        this.vy = 0;
+      }
+      return;
+    }
     const feetId = this.world.getBlock(
       Math.floor(this.x),
       Math.floor(this.y + 0.3),
@@ -433,9 +504,10 @@ export class Mob {
   syncModel(dt: number): void {
     const g = this.model.group;
     if (this.dying) {
-      // 侧翻倒地（MC 死亡姿态）
+      // 侧翻倒地（MC 死亡姿态）；恶魂保留体型缩放
       const t = Math.min(1, this.deathTimer / DEATH_TIME);
       g.rotation.z = (-Math.PI / 2) * t;
+      if (this.kind === 'ghast') g.scale.setScalar(4);
     }
     // 受伤红闪（死亡期间保持）
     const hurt = this.dying || this.hurtTimer > 0;
@@ -444,13 +516,21 @@ export class Mob {
       setMobHurt(this.model, hurt);
     }
 
-    const sp = Math.hypot(this.vx, this.vz);
-    this.walkPhase += sp * dt * 1.7;
-    const amp = Math.min(0.72, sp * 0.45);
-    const legs = this.model.legs;
-    for (let i = 0; i < legs.length; i++) {
-      legs[i].rotation.x =
-        Math.sin(this.walkPhase + (this.legPhase[i] ?? 0)) * amp;
+    // 恶魂触手：恒定轻柔摆动（不依赖移动速度），逐条错相
+    if (this.kind === 'ghast') {
+      const legs = this.model.legs;
+      for (let i = 0; i < legs.length; i++) {
+        legs[i].rotation.x = Math.sin(this.walkPhase * 1.5 + i * 0.7) * 0.25;
+      }
+    } else {
+      const sp = Math.hypot(this.vx, this.vz);
+      this.walkPhase += sp * dt * 1.7;
+      const amp = Math.min(0.72, sp * 0.45);
+      const legs = this.model.legs;
+      for (let i = 0; i < legs.length; i++) {
+        legs[i].rotation.x =
+          Math.sin(this.walkPhase + (this.legPhase[i] ?? 0)) * amp;
+      }
     }
 
     // 手臂：僵尸恒前举（攻击下压）；骷髅平时垂臂、射箭时抬起

@@ -313,6 +313,21 @@ function startGame(
         if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
         return;
       }
+      if (kind === 'zombie_piglin') {
+        // 僵尸猪灵掉 0~1 腐肉 + 0~1 金粒（权宜用金锭）+ 5 经验（MC）
+        const nr = Math.floor(Math.random() * 2);
+        for (let i = 0; i < nr; i++) drops.spawnFood(FOODS.rotten_flesh, x, y, z);
+        if (Math.random() < 0.5) drops.spawnTool(TOOLS.gold_ingot, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
+        return;
+      }
+      if (kind === 'ghast') {
+        // 恶魂掉 0~2 火药 + 0~1 恶魂之泪（权宜用金锭代替）+ 5 经验（MC）
+        const ng = Math.floor(Math.random() * 3);
+        for (let i = 0; i < ng; i++) drops.spawnTool(TOOLS.gunpowder, x, y, z);
+        if (gameMode === 'survival') xpManager.spawn(5, x, y, z);
+        return;
+      }
       const n =
         kind === 'pig'
           ? 1 + Math.floor(Math.random() * 3)
@@ -334,6 +349,12 @@ function startGame(
 
   // ---- 玩家（有存档则恢复位置/视角/飞行；坐标属当前维度） ----
   const body = new PlayerBody(cur().world);
+  // 读档落在下界时同步刷怪池与氛围（首次进入不触发传送）
+  if (dimension === 'nether') {
+    mobManager.setWorld(cur().world, true);
+    sky.setNether(true);
+    clouds.setVisible(false);
+  }
   if (save) {
     body.x = save.meta.player.x;
     body.y = save.meta.player.y;
@@ -741,7 +762,7 @@ function startGame(
     fluid.setWorld(w);
     gravity.setWorld(w);
     redstone.setWorld(w);
-    mobManager.setWorld(w);
+    mobManager.setWorld(w, target === 'nether');
     drops.setWorld(w);
     xpManager.setWorld(w);
     arrowManager.setWorld(w);
@@ -1821,7 +1842,7 @@ function startGame(
         (m) => {
           hurtPlayer(3, body.x - m.x, body.z - m.z);
         },
-        // 骷髅放箭：从眼部高度朝玩家胸口，重力补偿抬枪口 + 少量散布
+        // 骷髅放箭 / 恶魂吐火球：从眼部朝玩家胸口，重力补偿抬枪口 + 少量散布
         (m) => {
           const sx = m.x;
           const sy = m.y + m.height * 0.85;
@@ -1830,6 +1851,13 @@ function startGame(
           const tz = body.z - sz;
           const ty0 = body.y + 1.2 - sy;
           const flat = Math.hypot(tx, tz);
+          if (m.kind === 'ghast') {
+            // 恶魂火球：直线飞行（无下坠），命中即伤（复用箭矢管线）
+            const len = Math.hypot(tx, ty0, tz) || 1;
+            arrowManager.spawn(sx, sy, sz, tx / len, ty0 / len, tz / len, 12, true, 5, 0);
+            sfx.playShoot();
+            return;
+          }
           const t = Math.max(0.2, flat / 14); // 与 arrows.ts SPEED 一致
           let vx = tx;
           let vy = ty0 + 0.5 * 9 * t * t; // 抛物线补偿

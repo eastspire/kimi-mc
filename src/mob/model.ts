@@ -340,6 +340,57 @@ function paintZombie(ctx: CanvasRenderingContext2D): void {
   f(0, 30, 16, 2, '#2c2c3c');
 }
 
+/** 僵尸猪灵：腐肉粉躯体 + 猪鼻 + 金剑（人形同僵尸盒布局） */
+function paintZombiePiglin(ctx: CanvasRenderingContext2D): void {
+  const f = (x: number, y: number, w: number, h: number, c: string): void => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const flesh = '#e08a8a';
+  const rot = '#b8656a';
+  const cloth = '#7a4a2a';
+  // 头部（粉腐肉 + 局部腐烂斑）
+  f(0, 0, 32, 16, flesh);
+  for (let i = 0; i < 8; i++) f((i * 5) % 30, (i * 3) % 14, 2, 2, rot);
+  // 猪鼻（头正面中部）
+  f(10, 10, 4, 3, '#d97a7a');
+  f(11, 11, 1, 1, '#7a3a3a');
+  f(13, 11, 1, 1, '#7a3a3a');
+  // 眼（一好一腐）
+  f(9, 8, 1, 1, '#2a1a1a');
+  f(14, 8, 1, 1, '#e8e8e8');
+  // 躯干：裸露腐肉 + 腰布
+  f(16, 16, 24, 10, flesh);
+  f(16, 26, 24, 6, cloth);
+  for (let i = 0; i < 6; i++) f(16 + ((i * 7) % 22), 16 + ((i * 3) % 8), 2, 2, rot);
+  // 手臂：腐肉（右手持金剑，由几何另加）
+  f(40, 16, 16, 16, flesh);
+  f(40, 29, 16, 3, rot);
+  // 腿：腐肉 + 深色蹄
+  f(0, 16, 16, 16, flesh);
+  f(0, 30, 16, 2, '#5a2a2a');
+}
+
+/** 恶魂：惨白大头（哭脸）+ 同色触手区（64×32 布局，头 16px 盒 UV） */
+function paintGhast(ctx: CanvasRenderingContext2D): void {
+  const f = (x: number, y: number, w: number, h: number, c: string): void => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, w, h);
+  };
+  const pale = '#f0f0f0';
+  const shade = '#d8d8d8';
+  // 整张贴图铺惨白底（头 16px 盒覆盖 (0,0)-(64,32) 各面区）
+  f(0, 0, 64, 32, pale);
+  // 轻微色差斑
+  for (let i = 0; i < 20; i++) f((i * 11) % 62, (i * 7) % 30, 2, 1, shade);
+  // 哭脸：north 面（正面）区域 (16,16)-(32,32)
+  f(20, 21, 2, 4, '#4a4a4a'); // 左眼（垂泪）
+  f(26, 21, 2, 4, '#4a4a4a'); // 右眼
+  f(21, 27, 6, 1, '#5a5a5a'); // 嘴
+  f(20, 28, 1, 2, '#5a5a5a');
+  f(27, 28, 1, 2, '#5a5a5a');
+}
+
 // ------------------------------------------------------------
 // 模型装配（几何/材质缓存，跨个体共享）
 // ------------------------------------------------------------
@@ -376,6 +427,8 @@ let skeletonAssets: MobAssets | null = null;
 let creeperAssets: MobAssets | null = null;
 let spiderAssets: MobAssets | null = null;
 let endermanAssets: MobAssets | null = null;
+let zombiePiglinAssets: MobAssets | null = null;
+let ghastAssets: MobAssets | null = null;
 
 function makeAssets(paint: (ctx: CanvasRenderingContext2D) => void, geo: MobAssets['geo']): MobAssets {
   const tex = makeTexture(paint);
@@ -490,6 +543,31 @@ function getEndermanAssets(): MobAssets {
     });
   }
   return endermanAssets;
+}
+
+function getZombiePiglinAssets(): MobAssets {
+  if (!zombiePiglinAssets) {
+    // 与僵尸同盒布局（人形 2 格高），皮肤为猪灵
+    zombiePiglinAssets = makeAssets(paintZombiePiglin, {
+      body: mcBox(8, 12, 4, 16, 16),
+      head: mcBox(8, 8, 8, 0, 0),
+      arm: mcBox(4, 12, 4, 40, 16),
+      leg: mcBox(4, 12, 4, 0, 16),
+    });
+  }
+  return zombiePiglinAssets;
+}
+
+function getGhastAssets(): MobAssets {
+  if (!ghastAssets) {
+    // 头 16px（1 格）+ 9 触手；mcBox UV 布局要求头≤16px 才不越 64×32 贴图
+    // （模型经整体放大到恶魂尺寸，见 buildGhastModel）
+    ghastAssets = makeAssets(paintGhast, {
+      head: mcBox(16, 16, 16, 0, 0),
+      tentacle: mcBox(2, 8, 2, 48, 0),
+    });
+  }
+  return ghastAssets;
 }
 
 export function buildPigModel(): MobModel {
@@ -876,6 +954,85 @@ export function buildEndermanModel(): MobModel {
   return { group, head, legs, arms, armBase: 0, meshes, material: a.material, hurtMaterial: a.hurt };
 }
 
+/** 僵尸猪灵模型：人形同僵尸，但手臂垂放持剑（armBase 0，攻击抬起） */
+export function buildZombiePiglinModel(): MobModel {
+  const a = getZombiePiglinAssets();
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+  const add = (m: THREE.Mesh): THREE.Mesh => {
+    meshes.push(m);
+    return m;
+  };
+
+  const body = add(new THREE.Mesh(a.geo.body, a.material));
+  body.position.y = 18 * PX;
+  group.add(body);
+
+  const head = new THREE.Group();
+  head.position.set(0, 24 * PX, 0);
+  const headMesh = add(new THREE.Mesh(a.geo.head, a.material));
+  headMesh.position.y = 4 * PX;
+  head.add(headMesh);
+  group.add(head);
+
+  // 手臂垂放（持金剑姿态简化为下垂，攻击时抬起）
+  const arms: THREE.Group[] = [];
+  for (const ax of [-6, 6]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(ax * PX, 22 * PX, 0);
+    const mesh = add(new THREE.Mesh(a.geo.arm, a.material));
+    mesh.position.y = -4 * PX;
+    pivot.add(mesh);
+    group.add(pivot);
+    arms.push(pivot);
+  }
+
+  const legs: THREE.Group[] = [];
+  for (const lx of [-2, 2]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(lx * PX, 12 * PX, 0);
+    const mesh = add(new THREE.Mesh(a.geo.leg, a.material));
+    mesh.position.y = -6 * PX;
+    pivot.add(mesh);
+    group.add(pivot);
+    legs.push(pivot);
+  }
+  return { group, head, legs, arms, armBase: 0, meshes, material: a.material, hurtMaterial: a.hurt };
+}
+
+/** 恶魂模型：1 格头（哭脸）+ 9 触手，整体放大到恶魂体量（约 4×4×4 格） */
+export function buildGhastModel(): MobModel {
+  const a = getGhastAssets();
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+  const add = (m: THREE.Mesh): THREE.Mesh => {
+    meshes.push(m);
+    return m;
+  };
+  const SCALE = 4; // 1 格头放大到 4 格恶魂头
+
+  const head = new THREE.Group();
+  const headMesh = add(new THREE.Mesh(a.geo.head, a.material));
+  head.add(headMesh);
+  group.add(head);
+
+  // 9 条触手：3×3 排布于头底，下垂
+  const legs: THREE.Group[] = [];
+  for (let tx = -1; tx <= 1; tx++) {
+    for (let tz = -1; tz <= 1; tz++) {
+      const pivot = new THREE.Group();
+      pivot.position.set(tx * 4 * PX, -8 * PX, tz * 4 * PX);
+      const mesh = add(new THREE.Mesh(a.geo.tentacle, a.material));
+      mesh.position.y = -4 * PX; // 触手下垂
+      pivot.add(mesh);
+      group.add(pivot);
+      legs.push(pivot); // 触手挂 legs，由 syncModel 摆动
+    }
+  }
+  group.scale.setScalar(SCALE);
+  return { group, head, legs, arms: [], meshes, material: a.material, hurtMaterial: a.hurt };
+}
+
 /** 昼夜亮度同步到生物材质（与天空 daylight 一致，主循环每帧调用） */
 export function setMobBrightness(d: number): void {
   if (pigAssets) pigAssets.material.color.setScalar(d);
@@ -887,4 +1044,6 @@ export function setMobBrightness(d: number): void {
   if (creeperAssets) creeperAssets.material.color.setScalar(d);
   if (spiderAssets) spiderAssets.material.color.setScalar(d);
   if (endermanAssets) endermanAssets.material.color.setScalar(d);
+  if (zombiePiglinAssets) zombiePiglinAssets.material.color.setScalar(d);
+  if (ghastAssets) ghastAssets.material.color.setScalar(d);
 }

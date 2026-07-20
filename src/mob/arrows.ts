@@ -24,6 +24,8 @@ interface Arrow {
   hostile: boolean;
   /** 命中伤害（玩家箭按蓄力 1~9） */
   dmg: number;
+  /** 重力系数（0=直线火球，1=抛物线箭） */
+  gravityScale: number;
 }
 
 let arrowGeo: THREE.BoxGeometry | null = null;
@@ -64,6 +66,8 @@ export class ArrowManager {
     speed = SPEED,
     hostile = true,
     dmg = 3,
+    /** 重力系数：0=直线飞行（恶魂火球），1=抛物线（箭） */
+    gravityScale = 1,
   ): void {
     const mesh = new THREE.Mesh(arrowGeo!, arrowMat!);
     mesh.position.set(x, y, z);
@@ -80,6 +84,7 @@ export class ArrowManager {
       age: 0,
       hostile,
       dmg,
+      gravityScale,
     });
   }
 
@@ -115,7 +120,7 @@ export class ArrowManager {
         this.removeAt(i);
         continue;
       }
-      a.vy -= GRAVITY * dt;
+      a.vy -= GRAVITY * a.gravityScale * dt;
       // 细分为 4 小步防穿透
       let consumed = false;
       for (let s = 0; s < 4; s++) {

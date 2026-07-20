@@ -29,6 +29,8 @@ export class MobManager {
   private mobs: Mob[] = [];
   private spawnTimer = 4;
   private burnTick = 0;
+  /** 当前世界是否为下界（决定刷怪池与地表判定） */
+  private nether = false;
 
   constructor(
     private scene: THREE.Scene,
@@ -45,8 +47,9 @@ export class MobManager {
   }
 
   /** 维度切换时换绑世界并清除全部生物（旧维度生物不跨维度；新维度重新刷） */
-  setWorld(w: World): void {
+  setWorld(w: World, nether = false): void {
     this.world = w;
+    this.nether = nether;
     for (const m of this.mobs) this.scene.remove(m.model.group);
     this.mobs.length = 0;
   }
@@ -143,12 +146,35 @@ export class MobManager {
     const bz = Math.floor(pz + Math.sin(ang) * dist);
     if (!this.world.hasChunk(Math.floor(bx / 16), Math.floor(bz / 16))) return;
 
+    // 恶魂：空中生成（下界大空腔），无需地表；在 60~90 高度找净空
+    if (kind === 'ghast') {
+      for (let y = 90; y > 50; y--) {
+        // 需 5×5×5 净空
+        let clear = true;
+        for (let dy = 0; dy < 5 && clear; dy++)
+          for (let dx = -2; dx <= 2 && clear; dx++)
+            for (let dz = -2; dz <= 2 && clear; dz++)
+              if (this.world.isSolid(bx + dx, y + dy, bz + dz)) clear = false;
+        if (clear) {
+          this.spawn(kind, bx + 0.5, y + 2, bz + 0.5);
+          return;
+        }
+      }
+      return;
+    }
+
     const grassId = this.world.reg.id('grass_block');
     const leavesId = this.world.reg.id('oak_leaves');
+    const netherrackId = this.world.reg.byName.has('netherrack')
+      ? this.world.reg.id('netherrack')
+      : -1;
+    const soulSandId = this.world.reg.byName.has('soul_sand')
+      ? this.world.reg.id('soul_sand')
+      : -1;
 
     // 自上而下找第一个实体面：要求上方足够净空（按生物高度）
     const needClear = kind === 'enderman' ? 3 : 2;
-    for (let y = 110; y > 40; y--) {
+    for (let y = 110; y > (this.nether ? 12 : 40); y--) {
       if (!this.world.isSolid(bx, y, bz)) continue;
       let blocked = false;
       for (let c = 1; c <= needClear; c++) {
@@ -160,7 +186,11 @@ export class MobManager {
       if (blocked) return; // 顶面被堵（树上/悬空物下），本轮放弃
       const ground = this.world.getBlock(bx, y, bz);
       if (this.world.reg.isWater(ground) || ground === leavesId) return;
-      if (!HOSTILE.has(kind) && kind !== 'enderman' && ground !== grassId) return;
+      // 猪灵：下界岩/灵魂沙地表；主世界被动生物仅草方块
+      if (kind === 'zombie_piglin') {
+        if (ground !== netherrackId && ground !== soulSandId) return;
+      } else if (!HOSTILE.has(kind) && kind !== 'enderman' && ground !== grassId)
+        return;
       this.spawn(kind, bx + 0.5, y + 1.01, bz + 0.5);
       return;
     }
@@ -183,6 +213,7 @@ export class MobManager {
     setMobBrightness(daylight);
 
     // 追击目标分配（敌对生物）：玩家 24 格内；蜘蛛白天中立；末影人仅激怒时追击
+    // 僵尸猪灵中立，受击后被激怒（并广播附近同类群体仇恨）；恶魂 48 格内恒追击
     const nightHostile = daylight < 0.55;
     for (const m of this.mobs) {
       if (m.kind === 'enderman') {
@@ -194,6 +225,46 @@ export class MobManager {
         const dx = px - m.x;
         const dz = pz - m.z;
         m.hasTarget = dx * dx + dz * dz < CHASE_RANGE * CHASE_RANGE;
+        if (m.hasTarget) {
+          m.targetX = px;
+          m.targetY = py;
+          m.targetZ = pz;
+        }
+        continue;
+      }
+      if (m.kind === 'zombie_piglin') {
+        // 群体仇恨：被激怒个体点燃附近 16 格内同类
+        if (m.aggro && !m.dying) {
+          for (const o of this.mobs) {
+            if (o.kind !== 'zombie_piglin' || o.dying) continue;
+            const ddx = o.x - m.x;
+            const ddz = o.z - m.z;
+            if (ddx * ddx + ddz * ddz < 16 * 16) o.aggro = true;
+          }
+        }
+        if (m.dying || !m.aggro) {
+          m.hasTarget = false;
+          continue;
+        }
+        const dx = px - m.x;
+        const dz = pz - m.z;
+        m.hasTarget = dx * dx + dz * dz < CHASE_RANGE * CHASE_RANGE;
+        if (m.hasTarget) {
+          m.targetX = px;
+          m.targetY = py;
+          m.targetZ = pz;
+        }
+        continue;
+      }
+      if (m.kind === 'ghast') {
+        // 恶魂：48 格内恒追击（远程吐弹）
+        if (m.dying) {
+          m.hasTarget = false;
+          continue;
+        }
+        const dx = px - m.x;
+        const dz = pz - m.z;
+        m.hasTarget = dx * dx + dz * dz < 48 * 48;
         if (m.hasTarget) {
           m.targetX = px;
           m.targetY = py;
@@ -231,6 +302,10 @@ export class MobManager {
       if (m.shootArrow) {
         m.shootArrow = false;
         onShoot?.(m);
+      }
+      if (m.fireball) {
+        m.fireball = false;
+        onShoot?.(m); // 恶魂吐火球：复用放弹回调（main 按 kind 区分弹种）
       }
       if (m.fuseJustLit) {
         m.fuseJustLit = false;
@@ -285,10 +360,22 @@ export class MobManager {
       }
     }
 
-    // 生成节律：4~8s 一次尝试；白天四种被动生物均匀随机，夜晚三种敌对均匀随机
+    // 生成节律：4~8s 一次尝试；主世界白天刷被动/夜晚刷敌对，下界刷猪灵+恶魂
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       this.spawnTimer = 4 + Math.random() * 4;
+      if (this.nether) {
+        // 下界刷怪池：僵尸猪灵为主、恶魂较稀（MC 权重）
+        const NETHER_POOL: MobKind[] = [
+          'zombie_piglin', 'zombie_piglin', 'zombie_piglin', 'zombie_piglin',
+          'ghast',
+        ];
+        const kind = NETHER_POOL[Math.floor(Math.random() * NETHER_POOL.length)];
+        let n = 0;
+        for (const m of this.mobs) if (!m.dying) n++;
+        if (n < MAX_ZOMBIES) this.trySpawn(px, pz, kind);
+        return;
+      }
       const passive = daylight > 0.55;
       const PASSIVES: MobKind[] = ['pig', 'sheep', 'cow', 'chicken'];
       // 夜晚敌对池：末影人权重较低（MC 较稀有）

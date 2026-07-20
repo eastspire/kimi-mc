@@ -1,0 +1,28 @@
+{
+  "comment": "拉杆：贴地小石座（6×3×6）+ 斜木柄（并入单盒体简化）",
+  "elements": [
+    {
+      "from": [5, 0, 5],
+      "to": [11, 4, 11],
+      "faces": {
+        "down": { "texture": "#lever", "cullface": "down" },
+        "up": { "texture": "#lever" },
+        "north": { "texture": "#lever" },
+        "south": { "texture": "#lever" },
+        "west": { "texture": "#lever" },
+        "east": { "texture": "#lever" }
+      }
+    },
+    {
+      "from": [7, 4, 7],
+      "to": [9, 12, 9],
+      "faces": {
+        "up": { "texture": "#lever" },
+        "north": { "texture": "#lever" },
+        "south": { "texture": "#lever" },
+        "west": { "texture": "#lever" },
+        "east": { "texture": "#lever" }
+      }
+    }
+  ]
+}

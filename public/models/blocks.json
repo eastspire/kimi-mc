@@ -552,6 +552,16 @@
       "renderLayer": "solid",
       "hardness": 5.0,
       "luminance": 0
-    }
+    },
+    "redstone_dust_off": { "id": 61, "display": "红石粉", "model": "block/redstone_dust", "textures": { "dust": "redstone_dust_off" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "redstone_dust_on": { "id": 62, "display": "红石粉", "model": "block/redstone_dust", "textures": { "dust": "redstone_dust_on" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0, "replaceable": true, "luminance": 3 },
+    "redstone_torch_off": { "id": 63, "display": "红石火把", "model": "block/torch", "textures": { "torch": "redstone_torch_off" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0 },
+    "redstone_torch_on": { "id": 64, "display": "红石火把", "model": "block/torch", "textures": { "torch": "redstone_torch_on" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0, "luminance": 7 },
+    "lever_off": { "id": 65, "display": "拉杆", "model": "block/lever", "textures": { "lever": "lever" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0.5 },
+    "lever_on": { "id": 66, "display": "拉杆", "model": "block/lever", "textures": { "lever": "lever" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0.5, "luminance": 3 },
+    "stone_button": { "id": 67, "display": "石按钮", "model": "block/button", "textures": { "button": "button" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0.5 },
+    "redstone_lamp_off": { "id": 68, "display": "红石灯", "model": "block/cube_all", "textures": { "all": "redstone_lamp_off" }, "solid": true, "renderLayer": "solid", "hardness": 0.3 },
+    "redstone_lamp_on": { "id": 69, "display": "红石灯", "model": "block/cube_all", "textures": { "all": "redstone_lamp_on" }, "solid": true, "renderLayer": "solid", "hardness": 0.3, "luminance": 15 },
+    "piston": { "id": 70, "display": "活塞", "model": "block/cube_top", "textures": { "top": "piston_top", "side": "piston_side", "bottom": "piston_top" }, "solid": true, "renderLayer": "solid", "hardness": 1.5 }
   }
 }

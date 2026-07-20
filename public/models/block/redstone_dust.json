@@ -1,0 +1,13 @@
+{
+  "comment": "红石粉：贴地薄板（1/16 厚），仅顶面贴图",
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 1, 16],
+      "faces": {
+        "up": { "texture": "#dust" },
+        "down": { "texture": "#dust", "cullface": "down" }
+      }
+    }
+  ]
+}

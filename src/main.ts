@@ -37,6 +37,7 @@ import { ArrowManager } from './mob/arrows';
 import { TntManager } from './world/tnt';
 import { FluidSimulator } from './world/fluid';
 import { FallingBlockManager } from './world/falling-blocks';
+import { RedstoneSimulator } from './world/redstone';
 import type { MobKind } from './mob/mob';
 import { DropManager } from './item/drops';
 import { XpManager } from './item/xp';
@@ -887,6 +888,8 @@ function startGame(
     fluid.wake(wx, y, wz);
     gravity.tryStart(wx, y + 1, wz);
     gravity.tryStart(wx, y, wz);
+    // 唤醒红石电路（能量重算 / 用电器驱动）
+    redstone.wake(wx, y, wz);
   }
 
   // ---- 水流动 + 重力方块（MC 物理）：与 applyEdit 闭环，方块改动即触发 ----
@@ -898,6 +901,16 @@ function startGame(
     applyEdit,
     (def, x, y, z) => drops.spawnBlock(def, x, y, z),
   );
+
+  // ---- 红石电路（MC）：电源→红石粉衰减→用电器；方块改动经 applyEdit 唤醒 ----
+  const redstone = new RedstoneSimulator(world, {
+    setBlock: applyEdit,
+    igniteTnt: (x, y, z) => {
+      applyEdit(x, y, z, AIR);
+      tntManager.ignite(x + 0.5, y + 0.5, z + 0.5);
+      sfx.playFuse();
+    },
+  });
 
   /**
    * 爆炸（苦力怕 power=3 掉落 30%；TNT power=4 全掉落，MC 1.14+ 规则）：
@@ -1309,6 +1322,16 @@ function startGame(
       } else if (hitDef && hitDef.name === 'bed') {
         trySleep(currentHit!.x, currentHit!.y, currentHit!.z);
         useCooldown = 0.3;
+      } else if (
+        hitDef &&
+        (hitDef.name === 'lever_off' ||
+          hitDef.name === 'lever_on' ||
+          hitDef.name === 'stone_button')
+      ) {
+        // 红石电源：拉杆切换 / 按钮脉冲
+        if (redstone.activate(currentHit!.x, currentHit!.y, currentHit!.z))
+          sfx.playPlace();
+        useCooldown = 0.3;
       } else if (hitDef && hitDef.name === 'tnt') {
         // 点燃 TNT（简化：任意手持右键即点，MC 需打火石/火焰弹）
         applyEdit(currentHit!.x, currentHit!.y, currentHit!.z, AIR);
@@ -1368,6 +1391,19 @@ function startGame(
           0.4,
         );
         sfx.playPlace();
+        useCooldown = 0.3;
+      } else if (curTool?.id === 'redstone' && currentHit) {
+        // 红石粉：手持红石右键方块侧面 → 邻格铺红石粉（MC 直接放置）
+        const tx = currentHit.x + currentHit.nx;
+        const ty = currentHit.y + currentHit.ny;
+        const tz = currentHit.z + currentHit.nz;
+        const existing = world.getBlock(tx, ty, tz);
+        const ed = existing > 0 ? registry.def(existing) : null;
+        if (existing === AIR || (ed && ed.replaceable)) {
+          applyEdit(tx, ty, tz, registry.id('redstone_dust_off'));
+          if (gameMode === 'survival') consumeHeldMaterial('redstone');
+          sfx.playPlace();
+        }
         useCooldown = 0.3;
       } else {
         placeBlock();
@@ -1570,6 +1606,9 @@ function startGame(
       // 水流动（节流扩散/消退）+ 重力方块坠落
       fluid.update(dt);
       gravity.update(dt);
+
+      // 红石电路：脉冲推进 + 能量重算 + 用电器驱动
+      redstone.update(dt);
 
       // 掉落物：旋转/浮动/拾取（方块/食物均可入快捷栏，满则留在原地）
       drops.update(dt, body.x, body.y + 0.9, body.z, (item) => {

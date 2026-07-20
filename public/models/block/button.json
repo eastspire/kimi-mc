@@ -1,0 +1,17 @@
+{
+  "comment": "按钮：贴地小石钮（6×2×6）",
+  "elements": [
+    {
+      "from": [5, 0, 5],
+      "to": [11, 2, 11],
+      "faces": {
+        "down": { "texture": "#button", "cullface": "down" },
+        "up": { "texture": "#button" },
+        "north": { "texture": "#button" },
+        "south": { "texture": "#button" },
+        "west": { "texture": "#button" },
+        "east": { "texture": "#button" }
+      }
+    }
+  ]
+}

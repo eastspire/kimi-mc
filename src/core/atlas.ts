@@ -74,6 +74,16 @@ export const TILE_NAMES = [
   'mossy_cobble',
   'enchanting_top',
   'enchanting_side',
+  'redstone_dust_on',
+  'redstone_dust_off',
+  'redstone_torch_on',
+  'redstone_torch_off',
+  'lever',
+  'button',
+  'redstone_lamp_on',
+  'redstone_lamp_off',
+  'piston_side',
+  'piston_top',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -890,6 +900,109 @@ const PAINTERS: Record<TileName, Painter> = {
     ctx.fillRect(11, 5, 2, 2);
     ctx.fillStyle = '#581008';
     ctx.fillRect(0, 12, 16, 1);
+  },
+  // ---- 红石粉：透明底 + 中心点 + 四向线（on 亮红发光 / off 暗红） ----
+  redstone_dust_on: (ctx) => {
+    ctx.clearRect(0, 0, 16, 16);
+    const c = '#f03020';
+    const bright = '#ff7a60';
+    // 中心 4×4
+    ctx.fillStyle = c;
+    ctx.fillRect(6, 6, 4, 4);
+    ctx.fillStyle = bright;
+    ctx.fillRect(7, 7, 2, 2);
+    // 四向线（宽 2）
+    ctx.fillStyle = c;
+    ctx.fillRect(7, 0, 2, 6);
+    ctx.fillRect(7, 10, 2, 6);
+    ctx.fillRect(0, 7, 6, 2);
+    ctx.fillRect(10, 7, 6, 2);
+  },
+  redstone_dust_off: (ctx) => {
+    ctx.clearRect(0, 0, 16, 16);
+    const c = '#5a1408';
+    ctx.fillStyle = c;
+    ctx.fillRect(6, 6, 4, 4);
+    ctx.fillRect(7, 0, 2, 6);
+    ctx.fillRect(7, 10, 2, 6);
+    ctx.fillRect(0, 7, 6, 2);
+    ctx.fillRect(10, 7, 6, 2);
+  },
+  // ---- 红石火把：木柄 + 顶部红石（on 红亮发光 / off 暗） ----
+  redstone_torch_on: (ctx) => {
+    ctx.clearRect(0, 0, 16, 16);
+    for (let y = 8; y < 16; y++) {
+      px(ctx, 7, y, y % 2 ? '#6b5433' : '#7d6a42');
+      px(ctx, 8, y, y % 2 ? '#7d6a42' : '#57422a');
+    }
+    ctx.fillStyle = '#f03020';
+    ctx.fillRect(6, 3, 4, 5);
+    ctx.fillStyle = '#ff8a70';
+    ctx.fillRect(7, 4, 2, 2);
+    ctx.fillStyle = '#ffb0a0';
+    ctx.fillRect(7, 2, 2, 1);
+  },
+  redstone_torch_off: (ctx) => {
+    ctx.clearRect(0, 0, 16, 16);
+    for (let y = 8; y < 16; y++) {
+      px(ctx, 7, y, y % 2 ? '#6b5433' : '#7d6a42');
+      px(ctx, 8, y, y % 2 ? '#7d6a42' : '#57422a');
+    }
+    ctx.fillStyle = '#4a1408';
+    ctx.fillRect(6, 3, 4, 5);
+  },
+  // ---- 拉杆：石座 + 斜木柄 ----
+  lever: (ctx) => {
+    ctx.clearRect(0, 0, 16, 16);
+    ctx.fillStyle = '#7a7a7a';
+    ctx.fillRect(5, 10, 6, 4);
+    ctx.fillStyle = '#9a9a9a';
+    ctx.fillRect(5, 10, 6, 1);
+    for (let i = 0; i < 7; i++) px(ctx, 7 + i, 9 - i, i % 2 ? '#8a6a34' : '#a0723d');
+  },
+  // ---- 按钮：石质小方块 ----
+  button: (ctx) => {
+    ctx.clearRect(0, 0, 16, 16);
+    ctx.fillStyle = '#8a8a8a';
+    ctx.fillRect(5, 6, 6, 5);
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillRect(5, 6, 6, 2);
+    ctx.fillStyle = '#5a5a5a';
+    ctx.fillRect(5, 10, 6, 1);
+  },
+  // ---- 红石灯：on 暖黄发光 / off 暗棕 ----
+  redstone_lamp_on: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#f8c828', ['#f8e888', '#e8a818', '#fff8c8'], 0.5);
+    ctx.fillStyle = '#c88818';
+    ctx.fillRect(0, 0, 16, 1); ctx.fillRect(0, 15, 16, 1);
+    ctx.fillRect(0, 0, 1, 16); ctx.fillRect(15, 0, 1, 16);
+  },
+  redstone_lamp_off: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#6a4a20', ['#7a5a28', '#5a3a18', '#4a3414'], 0.5);
+    ctx.fillStyle = '#3a2810';
+    ctx.fillRect(0, 0, 16, 1); ctx.fillRect(0, 15, 16, 1);
+    ctx.fillRect(0, 0, 1, 16); ctx.fillRect(15, 0, 1, 16);
+  },
+  // ---- 活塞：侧面木框 + 顶部推板 ----
+  piston_side: (ctx, _ox, _oy, rnd) => {
+    paintPlanks(ctx, _ox, _oy, rnd);
+    ctx.fillStyle = '#8a8a8a';
+    ctx.fillRect(0, 0, 16, 4);
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillRect(0, 0, 16, 1);
+    ctx.fillStyle = '#5a5a5a';
+    ctx.fillRect(0, 3, 16, 1);
+  },
+  piston_top: (ctx, _ox, _oy, rnd) => {
+    ctx.fillStyle = '#9a9a9a';
+    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillRect(1, 1, 14, 14);
+    ctx.fillStyle = '#7a7a7a';
+    ctx.fillRect(3, 3, 10, 10);
+    ctx.fillStyle = '#8a8a8a';
+    ctx.fillRect(6, 6, 4, 4);
+    if (rnd() < 1) px(ctx, 2, 2, '#bababa');
   },
 };
 

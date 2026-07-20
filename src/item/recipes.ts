@@ -134,6 +134,28 @@ const RECIPES: Recipe[] = [
   ...armorRecipes('t:gold_ingot', 'gold'),
   ...armorRecipes('t:iron_ingot', 'iron'),
   ...armorRecipes('t:diamond', 'diamond'),
+  // ---- 红石元件 ----
+  // 红石火把：红石在上 + 棍在下
+  R(1, 2, ['t:redstone', S], { block: 'redstone_torch_on', count: 1 }),
+  // 拉杆：棍在上 + 圆石在下
+  R(1, 2, [S, C], { block: 'lever_off', count: 1 }),
+  // 石按钮：单圆石
+  R(1, 1, [C], { block: 'stone_button', count: 1 }),
+  // 红石灯：萤石居中 + 四红石
+  R(3, 3, ['', 't:redstone', '', 't:redstone', 'glowstone', 't:redstone', '', 't:redstone', ''], {
+    block: 'redstone_lamp_off',
+    count: 1,
+  }),
+  // 活塞：3 木板 + 圆石铁锭圆石 + 圆石红石圆石（MC 原版）
+  R(3, 3, [P, P, P, C, 't:iron_ingot', C, C, 't:redstone', C], {
+    block: 'piston',
+    count: 1,
+  }),
+  // 附魔台：书权宜(皮革) + 钻石×2 + 黑曜石×4（MC 原版）
+  R(3, 3, ['', 't:leather', '', 't:diamond', 'obsidian', 't:diamond', 'obsidian', 'obsidian', 'obsidian'], {
+    block: 'enchanting_table',
+    count: 1,
+  }),
 ];
 
 /** 生成一套盔甲的 4 件配方：头盔(5)、胸甲(8)、护腿(7)、靴(4) */

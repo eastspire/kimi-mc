@@ -626,6 +626,9 @@ function startGame(
   for (const dim of ALL_DIMS) {
     const d = dims[dim];
     d.cm.onChunkExplored = (cx, cz) => worldMap.recordChunk(d.world, cx, cz, dim);
+    // 加载阶段挂起邻区重网格化：区块落地不再触发四邻反复重建，
+    // 待世界稳定（加载完成）后统一按最新版本重排，每区块只网格化一次。
+    d.cm.setDeferNeighbors(true);
   }
 
   // ---- 附魔台：右键打开 UI，消耗经验+青金石给装备附魔 ----
@@ -722,6 +725,8 @@ function startGame(
 
   // ---- 交互状态 ----
   let state: GameState = 'loading';
+  // 加载是否仍处于“挂起邻区网格化”的第一阶段（地形生成）
+  let deferringLoad = true;
   let attackHeld = false;
   let useHeld = false;
   let useCooldown = 0;
@@ -1997,15 +2002,29 @@ function startGame(
     const hidden = document.hidden;
 
     if (state === 'loading') {
-      const p = cur().cm.update(body.x, body.z, 24, true);
+      const cm = cur().cm;
+      const p = cm.update(body.x, body.z, 24, true);
       if (p >= 1) {
-        state = 'ready';
-        startScreen.setReady(enterWorld);
+        if (deferringLoad) {
+          // 第一阶段完成（全部地形已生成）：放开网格化，进入第二阶段
+          deferringLoad = false;
+          for (const dim of ALL_DIMS) dims[dim].cm.setDeferNeighbors(false);
+          startScreen.setProgress('正在构建网格…', 0);
+        } else {
+          // 第二阶段完成（网格化补齐）：可进入游戏
+          state = 'ready';
+          startScreen.setReady(enterWorld);
+        }
       } else {
-        startScreen.setProgress(`正在生成世界… ${Math.round(p * 100)}%`, p);
+        startScreen.setProgress(
+          deferringLoad
+            ? `正在生成世界… ${Math.round(p * 100)}%`
+            : `正在构建网格… ${Math.round(p * 100)}%`,
+          p,
+        );
       }
       sky.update(dt, camera, []);
-      cur().cm.dayUniform.value = sky.daylight;
+      cm.dayUniform.value = sky.daylight;
       camera.position.set(body.x, body.y + EYE_HEIGHT, body.z);
       if (!hidden) {
         renderer.clear();

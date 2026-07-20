@@ -257,7 +257,34 @@ export class ChunkManager {
     const v = (this.versions.get(key) ?? 0) + 1;
     this.versions.set(key, v);
     if (this.inFlight.has(key)) return; // 结果回来时按最新 version 重派
+    // 加载阶段：邻区很可能尚未生成，现在网格化既浪费（随后邻区落地又要因边界
+    // 补全而重网格化）。挂起待世界稳定后由 flushDeferred 统一重排。
+    if (this.deferNeighbors) {
+      this.deferred.add(key);
+      return;
+    }
     this.waiting.set(key, { cx, cz, version: v });
+  }
+
+  /**
+   * 加载阶段开启后，queueMesh 只记录不派发（邻区还没生成，网格化会被反复推翻）。
+   * 关闭时把所有挂起区块按最新 version 一次性重排——此时邻区已齐，
+   * 每区块只网格化一次。游戏中编辑方块时本标志为 false，走即时重网格化。
+   */
+  private deferNeighbors = false;
+  private deferred = new Set<string>();
+
+  setDeferNeighbors(on: boolean): void {
+    if (this.deferNeighbors === on) return;
+    this.deferNeighbors = on;
+    if (on) return;
+    for (const key of this.deferred) {
+      const [cx, cz] = key.split(',').map(Number);
+      if (!this.world.hasChunk(cx, cz)) continue;
+      const version = this.versions.get(key) ?? 0;
+      if (!this.inFlight.has(key)) this.waiting.set(key, { cx, cz, version });
+    }
+    this.deferred.clear();
   }
 
   /** 从任意 16×128×16 布局的 Map 组装 18×128×18 带邻边数据（逐列拷贝，未加载邻区留 0） */
@@ -533,10 +560,16 @@ export class ChunkManager {
       for (let dx = -R; dx <= R; dx++) {
         const d2 = dx * dx + dz * dz;
         if (d2 > R * R + R) continue;
-        total += 2;
         const key = chunkKey(pcx + dx, pcz + dz);
-        if (this.world.chunks.has(key)) done += 1;
-        if (this.meshes.has(key)) done += 1;
+        if (this.deferNeighbors) {
+          // 挂起阶段：进度只追踪地形生成（网格化被延迟，否则会永远到不了 100%）
+          total += 1;
+          if (this.world.chunks.has(key)) done += 1;
+        } else {
+          total += 2;
+          if (this.world.chunks.has(key)) done += 1;
+          if (this.meshes.has(key)) done += 1;
+        }
       }
     }
     return total === 0 ? 1 : done / total;

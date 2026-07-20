@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Minecraft Web 复刻</title>
+  </head>
+  <body>
+    <div id="game"></div>
+
+    <!-- HUD 层 -->
+    <div id="hud">
+      <div id="crosshair"></div>
+      <div id="item-name"></div>
+      <div id="hotbar"></div>
+      <div id="debug"></div>
+      <div id="pause-hint" class="hidden">已暂停 — 点击画面继续（ESC 解锁鼠标）</div>
+    </div>
+
+    <!-- 开始 / 加载 / 错误 全屏界面 -->
+    <div id="overlay">
+      <div id="overlay-box">
+        <h1 id="overlay-title">Minecraft Web 复刻</h1>
+        <div id="overlay-sub">程序生成贴图 · 无版权素材 · Web 体素</div>
+        <div id="seed-row">
+          <input id="seed-input" type="text" placeholder="种子（留空则随机）" autocomplete="off" spellcheck="false" />
+        </div>
+        <div id="overlay-progress-wrap" class="hidden">
+          <div id="overlay-progress-text">正在生成世界…</div>
+          <div id="overlay-bar-outer"><div id="overlay-bar"></div></div>
+        </div>
+        <div id="overlay-btns">
+          <button id="continue-btn" class="hidden">继续上次的世界</button>
+          <button id="overlay-btn">创建新世界</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

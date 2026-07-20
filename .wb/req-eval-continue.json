@@ -1,0 +1,1 @@
+{"action":"evaluate","args":{"code":"(function(){const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('继续上次的世界'));if(b){b.click();return 'clicked continue';}return 'no continue button';})()"},"session":"mc-web-check"}

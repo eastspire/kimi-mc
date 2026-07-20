@@ -1,0 +1,1 @@
+{"action":"evaluate","args":{"code":"(function(){window.focus();return JSON.stringify({visibility:document.visibilityState,hasFocus:document.hasFocus()});})()"},"session":"mc-web-check"}

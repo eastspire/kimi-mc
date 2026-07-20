@@ -1,0 +1,26 @@
+{
+  "formatVersion": 1,
+  "comment": "方块注册表：模型路径引用 /models/block/*.json，贴图名对应程序生成图集中的格子。换成资源包风格 JSON 时保持字段一致即可。",
+  "hotbar": ["grass_block", "dirt", "stone", "oak_planks", "sand", "sandstone", "oak_log", "oak_leaves", "glass"],
+  "blocks": {
+    "air":            { "id": 0,  "display": "空气",     "model": null,               "solid": false, "selectable": false, "renderLayer": "solid", "hardness": -1 },
+    "stone":          { "id": 1,  "display": "石头",     "model": "block/cube_all",   "textures": { "all": "stone" },        "solid": true, "renderLayer": "solid", "hardness": 1.5 },
+    "dirt":           { "id": 2,  "display": "泥土",     "model": "block/cube_all",   "textures": { "all": "dirt" },         "solid": true, "renderLayer": "solid", "hardness": 0.5 },
+    "grass_block":    { "id": 3,  "display": "草方块",   "model": "block/cube_top",   "textures": { "top": "grass_top", "side": "grass_side", "bottom": "dirt" }, "solid": true, "renderLayer": "solid", "hardness": 0.6 },
+    "sand":           { "id": 4,  "display": "沙子",     "model": "block/cube_all",   "textures": { "all": "sand" },         "solid": true, "renderLayer": "solid", "hardness": 0.5 },
+    "sandstone":      { "id": 5,  "display": "砂岩",     "model": "block/cube_all",   "textures": { "all": "sandstone" },    "solid": true, "renderLayer": "solid", "hardness": 0.8 },
+    "oak_log":        { "id": 6,  "display": "橡木原木", "model": "block/cube_column", "textures": { "end": "log_top", "side": "log_side" }, "solid": true, "renderLayer": "solid", "hardness": 2.0 },
+    "oak_leaves":     { "id": 7,  "display": "橡树树叶", "model": "block/cube_all",   "textures": { "all": "leaves" },       "solid": true, "renderLayer": "solid", "hardness": 0.2, "cullSame": true },
+    "oak_planks":     { "id": 8,  "display": "橡木木板", "model": "block/cube_all",   "textures": { "all": "planks" },       "solid": true, "renderLayer": "solid", "hardness": 2.0 },
+    "bedrock":        { "id": 9,  "display": "基岩",     "model": "block/cube_all",   "textures": { "all": "bedrock" },      "solid": true, "renderLayer": "solid", "hardness": -1 },
+    "water":          { "id": 10, "display": "水",       "model": "block/cube_all",   "textures": { "all": "water_still" },  "solid": false, "selectable": false, "renderLayer": "translucent", "hardness": -1, "fluid": true, "cullSame": true },
+    "coal_ore":       { "id": 11, "display": "煤矿石",   "model": "block/cube_all",   "textures": { "all": "coal_ore" },     "solid": true, "renderLayer": "solid", "hardness": 3.0 },
+    "iron_ore":       { "id": 12, "display": "铁矿石",   "model": "block/cube_all",   "textures": { "all": "iron_ore" },     "solid": true, "renderLayer": "solid", "hardness": 3.0 },
+    "gold_ore":       { "id": 13, "display": "金矿石",   "model": "block/cube_all",   "textures": { "all": "gold_ore" },     "solid": true, "renderLayer": "solid", "hardness": 3.0 },
+    "diamond_ore":    { "id": 14, "display": "钻石矿石", "model": "block/cube_all",   "textures": { "all": "diamond_ore" },  "solid": true, "renderLayer": "solid", "hardness": 3.0 },
+    "tall_grass":     { "id": 15, "display": "高草",     "model": "block/cross",      "textures": { "cross": "tall_grass" },    "solid": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "flower_red":     { "id": 16, "display": "虞美人",   "model": "block/cross",      "textures": { "cross": "flower_red" },    "solid": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "flower_yellow":  { "id": 17, "display": "蒲公英",   "model": "block/cross",      "textures": { "cross": "flower_yellow" }, "solid": false, "renderLayer": "cutout", "hardness": 0, "replaceable": true },
+    "glass":          { "id": 18, "display": "玻璃",     "model": "block/cube_all",   "textures": { "all": "glass" },        "solid": true, "renderLayer": "cutout", "hardness": 0.3, "cullSame": true }
+  }
+}

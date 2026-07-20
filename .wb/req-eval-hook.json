@@ -1,0 +1,1 @@
+{"action":"evaluate","args":{"code":"(function(){window.__errs=[];addEventListener('error',e=>__errs.push(e.message+' @'+(e.filename||'')+':'+(e.lineno||'')));addEventListener('unhandledrejection',e=>__errs.push('rejection: '+String(e.reason&&e.reason.stack||e.reason)));return 'hooked';})()"},"session":"mc-web-check"}

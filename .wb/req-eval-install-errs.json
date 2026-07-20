@@ -1,0 +1,1 @@
+{"action":"evaluate","args":{"code":"(function(){window.__errs=[];addEventListener('error',e=>__errs.push(e.message));addEventListener('unhandledrejection',e=>__errs.push(String(e.reason)));location.reload();return 'collectors installed, reloading';})()"},"session":"mc-web-check"}

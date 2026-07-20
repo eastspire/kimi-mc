@@ -1,0 +1,7 @@
+{
+  "parent": "block/cube",
+  "textures": {
+    "up": "#end", "down": "#end",
+    "north": "#side", "south": "#side", "west": "#side", "east": "#side"
+  }
+}

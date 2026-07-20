@@ -38,3 +38,4 @@ npm.cmd run preview  # 预览构建产物
 ## 效果
 
 ![](markdown-images/image.png)
+![](markdown-images/image-1.png)

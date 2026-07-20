@@ -562,6 +562,10 @@
     "stone_button": { "id": 67, "display": "石按钮", "model": "block/button", "textures": { "button": "button" }, "solid": false, "selectable": true, "renderLayer": "cutout", "hardness": 0.5 },
     "redstone_lamp_off": { "id": 68, "display": "红石灯", "model": "block/cube_all", "textures": { "all": "redstone_lamp_off" }, "solid": true, "renderLayer": "solid", "hardness": 0.3 },
     "redstone_lamp_on": { "id": 69, "display": "红石灯", "model": "block/cube_all", "textures": { "all": "redstone_lamp_on" }, "solid": true, "renderLayer": "solid", "hardness": 0.3, "luminance": 15 },
-    "piston": { "id": 70, "display": "活塞", "model": "block/cube_top", "textures": { "top": "piston_top", "side": "piston_side", "bottom": "piston_top" }, "solid": true, "renderLayer": "solid", "hardness": 1.5 }
+    "piston": { "id": 70, "display": "活塞", "model": "block/cube_top", "textures": { "top": "piston_top", "side": "piston_side", "bottom": "piston_top" }, "solid": true, "renderLayer": "solid", "hardness": 1.5 },
+    "netherrack": { "id": 71, "display": "下界岩", "model": "block/cube_all", "textures": { "all": "netherrack" }, "solid": true, "renderLayer": "solid", "hardness": 0.4 },
+    "soul_sand": { "id": 72, "display": "灵魂沙", "model": "block/cube_all", "textures": { "all": "soul_sand" }, "solid": true, "renderLayer": "solid", "hardness": 0.5 },
+    "lava": { "id": 73, "display": "岩浆", "model": "block/cube_all", "textures": { "all": "lava_still" }, "solid": false, "selectable": false, "renderLayer": "translucent", "hardness": -1, "luminance": 15, "cullSame": true },
+    "nether_portal": { "id": 74, "display": "下界传送门", "model": "block/nether_portal", "textures": { "portal": "nether_portal" }, "solid": false, "selectable": false, "renderLayer": "cutout", "hardness": -1, "luminance": 11, "replaceable": false }
   }
 }

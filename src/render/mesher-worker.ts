@@ -1,7 +1,7 @@
 import { buildChunkMesh, type MeshArrays } from './mesher';
 import type { BlockDef } from '../core/model-loader';
 import { BlockRegistry } from '../core/block-registry';
-import { WorldGen } from '../world/worldgen';
+import { WorldGen, type Dimension } from '../world/worldgen';
 
 // ============================================================
 // 区块 Worker：同池双任务
@@ -24,6 +24,7 @@ export interface MeshJobIn {
   defs?: (BlockDef | null)[];
   seed?: number;
   ao?: boolean;
+  dim?: Dimension;
   cx?: number;
   cz?: number;
   version?: number;
@@ -83,7 +84,7 @@ self.onmessage = (e: MessageEvent<MeshJobIn>) => {
         flat,
         flat.map((d) => d.name),
       );
-      worldGen = new WorldGen(m.seed, reg);
+      worldGen = new WorldGen(m.seed, reg, m.dim ?? 'overworld');
     }
     return;
   }

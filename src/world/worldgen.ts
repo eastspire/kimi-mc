@@ -40,6 +40,12 @@ export const enum Biome {
   Forest,
 }
 
+/** 维度：主世界 / 下界（同一 WorldGen 类按维度走不同地形分支） */
+export type Dimension = 'overworld' | 'nether';
+
+/** 下界岩浆海平面（此高度及以下灌岩浆） */
+export const NETHER_LAVA_LEVEL = 11;
+
 export class WorldGen {
   private heightNoise: Noise2D;
   private detailNoise: Noise2D;
@@ -49,6 +55,8 @@ export class WorldGen {
   private caveNoiseB: Noise3D;
   private treeSalt: number;
   private oreSalt: number;
+  /** 维度（主世界地表 / 下界封闭洞穴） */
+  readonly dimension: Dimension;
 
   // 方块 id 缓存
   private idStone: number;
@@ -70,11 +78,18 @@ export class WorldGen {
   private idTallGrass: number;
   private idFlowerRed: number;
   private idFlowerYellow: number;
+  // 下界方块 id 缓存
+  private idNetherrack: number;
+  private idSoulSand: number;
+  private idLava: number;
+  private idGlowstone: number;
 
   constructor(
     public readonly seed: number,
     reg: BlockRegistry,
+    dimension: Dimension = 'overworld',
   ) {
+    this.dimension = dimension;
     this.heightNoise = new Noise2D(seed ^ 0x1a2b3c);
     this.detailNoise = new Noise2D(seed ^ 0x4d5e6f);
     this.tempNoise = new Noise2D(seed ^ 0x7a8b9c);
@@ -103,6 +118,13 @@ export class WorldGen {
     this.idTallGrass = reg.id('tall_grass');
     this.idFlowerRed = reg.id('flower_red');
     this.idFlowerYellow = reg.id('flower_yellow');
+    // 下界（缺名回退占位，保证旧 blocks.json 不崩）
+    const opt = (n: string, fallback: number): number =>
+      reg.byName.has(n) ? reg.id(n) : fallback;
+    this.idNetherrack = opt('netherrack', this.idStone);
+    this.idSoulSand = opt('soul_sand', this.idDirt);
+    this.idLava = opt('lava', this.idWater);
+    this.idGlowstone = opt('glowstone', this.idStone);
   }
 
   /** 地表高度（纯函数，跨区块一致） */
@@ -153,6 +175,12 @@ export class WorldGen {
   }
 
   generateChunk(cx: number, cz: number): Uint8Array {
+    return this.dimension === 'nether'
+      ? this.generateNetherChunk(cx, cz)
+      : this.generateOverworldChunk(cx, cz);
+  }
+
+  private generateOverworldChunk(cx: number, cz: number): Uint8Array {
     const data = new Uint8Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
     const idx = (x: number, y: number, z: number): number => x + CHUNK_X * (z + CHUNK_Z * y);
     const bx = cx * CHUNK_X;
@@ -247,6 +275,93 @@ export class WorldGen {
         put(tx, top + 1, tz - 1, this.idLeaves, true);
         // 树干（最后放，优先于树叶）
         for (let y = ground + 1; y <= top; y++) put(tx, y, tz, this.idLog, false);
+      }
+    }
+
+    return data;
+  }
+
+  // ============================================================
+  // 下界维度（MC 1.16- 简化）：封闭洞窟维度
+  //  - 顶/底基岩封闭（顶 y≥120 基岩盖，底 y=0 基岩）
+  //  - 主体下界岩，两条 3D 噪声挖出连通大洞窟
+  //  - y≤NETHER_LAVA_LEVEL 灌岩浆海；谷地灵魂沙；洞顶垂挂萤石簇
+  // ============================================================
+  private generateNetherChunk(cx: number, cz: number): Uint8Array {
+    const data = new Uint8Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
+    const idx = (x: number, y: number, z: number): number =>
+      x + CHUNK_X * (z + CHUNK_Z * y);
+    const bx = cx * CHUNK_X;
+    const bz = cz * CHUNK_Z;
+    const TOP = CHUNK_Y - 1; // 127
+
+    for (let z = 0; z < CHUNK_Z; z++) {
+      for (let x = 0; x < CHUNK_X; x++) {
+        const wx = bx + x;
+        const wz = bz + z;
+        // 谷地起伏（低频），决定灵魂沙分布与地表微起伏
+        const valley = this.detailNoise.fbm(wx * 0.02 + 400, wz * 0.02 - 400, 3);
+
+        for (let y = 0; y <= TOP; y++) {
+          // 基岩底（y=0 必有，1~2 层粗糙）与基岩顶（y=127 必有，124~126 粗糙）
+          if (
+            y === 0 ||
+            (y === 1 && hash3i(wx, y, wz, this.oreSalt ^ 0xbed) < 0.6) ||
+            (y === 2 && hash3i(wx, y, wz, this.oreSalt ^ 0xbed) < 0.2) ||
+            y === TOP ||
+            (y === TOP - 1 && hash3i(wx, y, wz, this.oreSalt ^ 0xbed2) < 0.6) ||
+            (y === TOP - 2 && hash3i(wx, y, wz, this.oreSalt ^ 0xbed2) < 0.2)
+          ) {
+            data[idx(x, y, z)] = this.idBedrock;
+            continue;
+          }
+          // 洞窟：两条 3D 噪声带交叠 → 大型连通空腔
+          const a = this.caveNoiseA.fbm(wx * 0.016, y * 0.024, wz * 0.016, 3);
+          const b = this.caveNoiseB.fbm(
+            wx * 0.018 + 300,
+            y * 0.026,
+            wz * 0.018 - 210,
+            3,
+          );
+          const open = Math.abs(a) < 0.26 && Math.abs(b) < 0.26;
+          if (open) {
+            // 岩浆海：低于海平面的空腔灌岩浆
+            if (y <= NETHER_LAVA_LEVEL) data[idx(x, y, z)] = this.idLava;
+            // 否则留空气
+            continue;
+          }
+          // 灵魂沙谷地（仅岩浆海平面附近的实心表层）
+          if (
+            valley > 0.18 &&
+            y <= NETHER_LAVA_LEVEL + 6 &&
+            y > NETHER_LAVA_LEVEL
+          ) {
+            data[idx(x, y, z)] = this.idSoulSand;
+            continue;
+          }
+          data[idx(x, y, z)] = this.idNetherrack;
+        }
+      }
+    }
+
+    // ---- 洞顶垂挂萤石簇（找"上实体、下空气"的顶面随机挂） ----
+    for (let z = 0; z < CHUNK_Z; z++) {
+      for (let x = 0; x < CHUNK_X; x++) {
+        const wx = bx + x;
+        const wz = bz + z;
+        if (hash2i(wx, wz, this.oreSalt ^ 0x910be) > 0.012) continue;
+        // 从顶部向下找首个"实体下接空气"的洞顶，向下挂 1~3 格萤石
+        for (let y = 118; y > NETHER_LAVA_LEVEL + 8; y--) {
+          const here = data[idx(x, y, z)];
+          const below = data[idx(x, y - 1, z)];
+          if (here !== this.idNetherrack || below !== AIR) continue;
+          const len = 1 + ((hash3i(wx, y, wz, this.oreSalt ^ 0x910c) * 3) | 0);
+          for (let k = 1; k <= len; k++) {
+            if (y - k < 1) break;
+            data[idx(x, y - k, z)] = this.idGlowstone;
+          }
+          break;
+        }
       }
     }
 

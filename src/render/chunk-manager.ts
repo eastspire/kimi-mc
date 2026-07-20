@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { BlockDef } from '../core/model-loader';
 import type { World } from '../world/world';
 import { chunkKey } from '../world/world';
-import type { WorldGen } from '../world/worldgen';
+import type { WorldGen, Dimension } from '../world/worldgen';
 import type { AtlasResult } from '../core/atlas';
 import type { JobOut, PackedGeometry } from './mesher-worker';
 
@@ -42,7 +42,7 @@ const MAP_FRAG = /* glsl */ `
   vec2 fuv = fract(vMapUv);
   vec2 atlasUv = vec2(
     (tileCol * 16.0 + 0.5 + fuv.x * 15.0) / 128.0,
-    ((tileRow + 1.0) * 16.0 - 0.5 - fuv.y * 15.0) / 128.0
+    ((tileRow + 1.0) * 16.0 - 0.5 - fuv.y * 15.0) / 192.0
   );
   diffuseColor *= texture2D(map, atlasUv);
 #endif
@@ -133,6 +133,8 @@ export class ChunkManager {
     private provide:
       | ((cx: number, cz: number) => Uint8Array | null)
       | null = null,
+    /** 维度：决定 Worker 生成地形用主世界还是下界分支 */
+    private dim: Dimension = 'overworld',
   ) {
     this.opaqueMat = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -172,6 +174,7 @@ export class ChunkManager {
       defs: this.workerDefs,
       seed: this.worldGen.seed,
       ao: this.aoFlag,
+      dim: this.dim,
     });
     w.onmessage = (e: MessageEvent<JobOut>) => {
       this.results.push(e.data);

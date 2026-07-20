@@ -1,0 +1,21 @@
+{
+  "comment": "下界传送门：竖直十字交叉薄板（X 向 + Z 向），贯通全格，无碰撞",
+  "elements": [
+    {
+      "from": [0, 0, 8],
+      "to": [16, 16, 8],
+      "faces": {
+        "north": { "texture": "#portal" },
+        "south": { "texture": "#portal" }
+      }
+    },
+    {
+      "from": [8, 0, 0],
+      "to": [8, 16, 16],
+      "faces": {
+        "west": { "texture": "#portal" },
+        "east": { "texture": "#portal" }
+      }
+    }
+  ]
+}

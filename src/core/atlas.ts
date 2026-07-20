@@ -7,7 +7,7 @@ import * as THREE from 'three';
 
 export const TILE_SIZE = 16;
 export const ATLAS_COLS = 8;
-export const ATLAS_ROWS = 8;
+export const ATLAS_ROWS = 12;
 
 export const TILE_NAMES = [
   'grass_top',
@@ -84,6 +84,11 @@ export const TILE_NAMES = [
   'redstone_lamp_off',
   'piston_side',
   'piston_top',
+  // ---- 下界维度 ----
+  'netherrack',
+  'soul_sand',
+  'lava_still',
+  'nether_portal',
 ] as const;
 
 export type TileName = (typeof TILE_NAMES)[number];
@@ -1003,6 +1008,67 @@ const PAINTERS: Record<TileName, Painter> = {
     ctx.fillStyle = '#8a8a8a';
     ctx.fillRect(6, 6, 4, 4);
     if (rnd() < 1) px(ctx, 2, 2, '#bababa');
+  },
+  // ---- 下界岩：暗红岩体 + 杂斑 ----
+  netherrack: (ctx, _ox, _oy, rnd) => {
+    speckle(
+      ctx,
+      rnd,
+      '#6e2727',
+      ['#5e1f1f', '#7e3030', '#541a1a', '#883838'],
+      0.55,
+    );
+    for (let i = 0; i < 8; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#3f1212'); // 暗结
+  },
+  // ---- 灵魂沙：灰棕底 + 哀嚎鬼脸凹坑 ----
+  soul_sand: (ctx, _ox, _oy, rnd) => {
+    speckle(ctx, rnd, '#5b4535', ['#4e3a2c', '#68503d', '#453324'], 0.5);
+    // 两张"脸"：双眼 + 张口
+    for (const [fx, fy] of [
+      [4, 5],
+      [11, 9],
+    ] as const) {
+      px(ctx, fx, fy, '#241a12');
+      px(ctx, fx + 2, fy, '#241a12'); // 眼
+      px(ctx, fx + 1, fy + 2, '#1a120c');
+      px(ctx, fx + 1, fy + 3, '#1a120c'); // 口
+    }
+  },
+  // ---- 岩浆：橙红炽流 + 亮黄斑 ----
+  lava_still: (ctx, _ox, _oy, rnd) => {
+    ctx.fillStyle = '#d04a08';
+    ctx.fillRect(0, 0, 16, 16);
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        const r = rnd();
+        if (r < 0.18) px(ctx, x, y, '#e86a10');
+        else if (r < 0.3) px(ctx, x, y, '#b83a06');
+        else if (r < 0.38) px(ctx, x, y, '#f8a828'); // 亮黄炽热
+      }
+    }
+    // 流动亮纹
+    for (let i = 0; i < 4; i++) {
+      const y = (rnd() * 16) | 0;
+      for (let x = 0; x < 16; x++) if (rnd() < 0.5) px(ctx, x, y, '#ffd84a');
+    }
+  },
+  // ---- 下界传送门：半透明紫涡 + 亮紫闪点（十字板镂空底） ----
+  nether_portal: (ctx, _ox, _oy, rnd) => {
+    ctx.clearRect(0, 0, 16, 16);
+    // 竖向紫色流纹（模拟漩涡）
+    for (let x = 0; x < 16; x++) {
+      const phase = Math.sin(x * 0.9) * 2;
+      for (let y = 0; y < 16; y++) {
+        const w = Math.sin((y + phase) * 0.8 + x * 0.5);
+        if (w > 0.2) px(ctx, x, y, '#7a2ea8');
+        else if (w > -0.2) px(ctx, x, y, '#5a1e80');
+        else if (rnd() < 0.5) px(ctx, x, y, '#3a1258');
+      }
+    }
+    // 亮紫闪点
+    for (let i = 0; i < 14; i++)
+      px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, '#c07af0');
   },
 };
 

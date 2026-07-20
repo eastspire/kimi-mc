@@ -44,7 +44,11 @@ async function boot(): Promise<void> {
     } catch (e) {
       console.warn('存档损坏或 IndexedDB 不可用，按无存档处理', e);
       save = null;
-      try { await persistence.clear(); } catch { /* 忽略清理失败 */ }
+      try {
+        await persistence.clear();
+      } catch {
+        /* 忽略清理失败 */
+      }
     }
 
     showMenu(atlas, registry, defs, persistence, save);
@@ -81,14 +85,27 @@ function showMenu(
       window.clearTimeout(createArmTimer);
       createArmed = false;
       if (save) {
-        persistence.clear().catch(() => { /* 清理失败也继续 */ }).then(begin);
+        persistence
+          .clear()
+          .catch(() => {
+            /* 清理失败也继续 */
+          })
+          .then(begin);
       } else {
         begin();
       }
     },
     onContinue: () => {
       if (!save) return;
-      startGame(atlas, registry, defs, persistence, save, save.meta.seed, save.meta.seedText);
+      startGame(
+        atlas,
+        registry,
+        defs,
+        persistence,
+        save,
+        save.meta.seed,
+        save.meta.seedText,
+      );
     },
   });
 }
@@ -105,14 +122,22 @@ function startGame(
   startScreen.showGenerating();
 
   // ---- 渲染基础 ----
-  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+  const renderer = new THREE.WebGLRenderer({
+    antialias: false,
+    powerPreference: 'high-performance',
+  });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.autoClear = false; // 手动清屏：主场景后还要叠加手持物二次渲染
   document.getElementById('game')!.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000,
+  );
   camera.rotation.order = 'YXZ';
   const BASE_FOV = 75;
   const SPRINT_FOV = 85;
@@ -131,7 +156,11 @@ function startGame(
   // 因此编辑即时反映，保存时编码即为最新状态
   const modifiedChunks: Map<string, Uint8Array> = save?.chunks ?? new Map();
   const chunkManager = new ChunkManager(
-    scene, world, worldGen, atlas, defs,
+    scene,
+    world,
+    worldGen,
+    atlas,
+    defs,
     (cx, cz) => modifiedChunks.get(chunkKey(cx, cz)) ?? null,
   );
   const sky = new Sky(scene, renderer);
@@ -139,7 +168,12 @@ function startGame(
   const hand = new Hand(chunkManager.opaqueMat);
   hand.resize(window.innerWidth, window.innerHeight);
   // 恢复存档昼夜（旧存档无此字段 → 保持默认上午）
-  if (save && Number.isFinite(save.meta.dayTime)) sky.setTime(save.meta.dayTime!);
+  if (save && Number.isFinite(save.meta.dayTime))
+    sky.setTime(save.meta.dayTime!);
+  // 常规雾距（水下切换后用于恢复）
+  const fogNear0 = (scene.fog as THREE.Fog).near;
+  const fogFar0 = (scene.fog as THREE.Fog).far;
+  const underwaterColor = new THREE.Color();
   const particles = new Particles(scene);
 
   // ---- 玩家（有存档则恢复位置/视角/飞行） ----
@@ -155,25 +189,52 @@ function startGame(
     body.y = Math.max(worldGen.heightAt(8, 8), SEA_LEVEL) + 2;
   }
 
-  // 诊断钩子（控制台调试用）
-  (window as unknown as { __mc: unknown }).__mc = { chunkManager, world, body };
+  // 诊断钩子（控制台调试用）；__mc 在 controls 创建后才赋值（TDZ）
   // 调试验证钩子：强制昼夜（0..1 为一天内时刻）/ 传送
-  (window as unknown as { __setTime: (f: number) => void }).__setTime = (f) => sky.setTime(f * DAY_LENGTH);
-  (window as unknown as { __tp: (x: number, y: number, z: number) => void }).__tp = (x, y, z) => {
-    body.x = x; body.y = y; body.z = z;
-    body.vx = 0; body.vy = 0; body.vz = 0;
+  (window as unknown as { __setTime: (f: number) => void }).__setTime = (f) =>
+    sky.setTime(f * DAY_LENGTH);
+  (
+    window as unknown as { __tp: (x: number, y: number, z: number) => void }
+  ).__tp = (x, y, z) => {
+    body.x = x;
+    body.y = y;
+    body.z = z;
+    body.vx = 0;
+    body.vy = 0;
+    body.vz = 0;
+  };
+  (
+    window as unknown as { __look: (yaw: number, pitch: number) => void }
+  ).__look = (yaw, pitch) => {
+    controls.yaw = yaw;
+    controls.pitch = pitch;
+  };
+  // 性能基准：同步连跑 n 帧返回 FPS（用于被系统遮挡导致 rAF 冻结的环境）
+  (window as unknown as { __bench: (n: number) => number }).__bench = (n) => {
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) frame();
+    return Math.round(n / ((performance.now() - t0) / 1000));
   };
 
   // ---- UI / 音效 ----
   const hud = new Hud();
   const debugPanel = new DebugPanel();
   const sfx = new Sfx();
-  const hotbar = new Hotbar(registry.hotbar, atlas.canvas, (def) => hud.showItemName(def.display));
+  const hotbar = new Hotbar(registry.hotbar, atlas.canvas, (def) => {
+    hud.showItemName(def.display);
+    hand.setBlock(def); // 切换槽位：换手持模型 + equip 动画
+  });
+  hand.setBlock(hotbar.current);
+  const waterId = registry.id('water');
 
   // ---- 目标方块高亮 + 裂纹 ----
   const highlight = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002)),
-    new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.85 }),
+    new THREE.LineBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.85,
+    }),
   );
   highlight.visible = false;
   scene.add(highlight);
@@ -201,6 +262,7 @@ function startGame(
   let currentHit: RayHit | null = null;
   let stepDist = 0;
   let sprinting = false;
+  let underwater = false;
 
   const controls = new Controls(renderer.domElement, {
     onToggleFly: () => {
@@ -209,10 +271,23 @@ function startGame(
     },
     onHotbar: (i) => hotbar.select(i),
     onDebugToggle: () => debugPanel.toggle(),
-    onAttack: (down) => { attackHeld = down; if (!down) { breakProgress = 0; breakKey = ''; } },
-    onUse: (down) => { useHeld = down; if (down) useCooldown = 0; },
-    onSneak: (v) => { body.sneaking = v; },
-    onSprint: () => { if (!body.flying) sprinting = true; },
+    onAttack: (down) => {
+      attackHeld = down;
+      if (!down) {
+        breakProgress = 0;
+        breakKey = '';
+      }
+    },
+    onUse: (down) => {
+      useHeld = down;
+      if (down) useCooldown = 0;
+    },
+    onSneak: (v) => {
+      body.sneaking = v;
+    },
+    onSprint: () => {
+      if (!body.flying) sprinting = true;
+    },
   });
   if (save) {
     controls.yaw = save.meta.player.yaw;
@@ -225,6 +300,15 @@ function startGame(
   renderer.domElement.addEventListener('click', () => {
     if (state === 'playing' && !controls.locked) controls.lock();
   });
+  // 诊断钩子（控制台调试用）
+  (window as unknown as { __mc: unknown }).__mc = {
+    chunkManager,
+    world,
+    body,
+    camera,
+    controls,
+    sky,
+  };
 
   // ---- 存档 ----
   let saving = false;
@@ -238,16 +322,22 @@ function startGame(
           seed,
           seedText: seedLabel,
           player: {
-            x: body.x, y: body.y, z: body.z,
-            yaw: controls.yaw, pitch: controls.pitch,
+            x: body.x,
+            y: body.y,
+            z: body.z,
+            yaw: controls.yaw,
+            pitch: controls.pitch,
             flying: body.flying,
           },
           savedAt: Date.now(),
+          dayTime: sky.timeValue,
         },
         modifiedChunks,
       )
       .catch((e) => console.warn('自动保存失败', e))
-      .finally(() => { saving = false; });
+      .finally(() => {
+        saving = false;
+      });
   };
   window.setInterval(saveNow, 30_000); // 每 30s 自动保存
   document.addEventListener('visibilitychange', () => {
@@ -264,7 +354,11 @@ function startGame(
       def.elements[0]?.faces.south?.tile ??
       def.elements[0]?.faces.north?.tile ??
       0;
-    return [atlas.tileColors[tile * 3], atlas.tileColors[tile * 3 + 1], atlas.tileColors[tile * 3 + 2]];
+    return [
+      atlas.tileColors[tile * 3],
+      atlas.tileColors[tile * 3 + 1],
+      atlas.tileColors[tile * 3 + 2],
+    ];
   }
 
   /** 写入方块并同步：网格重建 + 修改集合（存档用） */
@@ -306,11 +400,24 @@ function startGame(
     // 射线
     camera.getWorldDirection(tmpDir);
     const eye = camera.position;
-    currentHit = raycastVoxel(world, eye.x, eye.y, eye.z, tmpDir.x, tmpDir.y, tmpDir.z, 5);
+    currentHit = raycastVoxel(
+      world,
+      eye.x,
+      eye.y,
+      eye.z,
+      tmpDir.x,
+      tmpDir.y,
+      tmpDir.z,
+      5,
+    );
 
     if (currentHit) {
       highlight.visible = true;
-      highlight.position.set(currentHit.x + 0.5, currentHit.y + 0.5, currentHit.z + 0.5);
+      highlight.position.set(
+        currentHit.x + 0.5,
+        currentHit.y + 0.5,
+        currentHit.z + 0.5,
+      );
     } else {
       highlight.visible = false;
     }
@@ -338,7 +445,11 @@ function startGame(
             cracking = true;
             const stage = Math.min(9, Math.floor(breakProgress * 10));
             atlas.crackTexture.offset.x = stage * 0.1;
-            crackMesh.position.set(currentHit.x + 0.5, currentHit.y + 0.5, currentHit.z + 0.5);
+            crackMesh.position.set(
+              currentHit.x + 0.5,
+              currentHit.y + 0.5,
+              currentHit.z + 0.5,
+            );
           }
         }
       }
@@ -358,7 +469,8 @@ function startGame(
 
   function facingText(): string {
     camera.getWorldDirection(tmpDir);
-    const ax = Math.abs(tmpDir.x), az = Math.abs(tmpDir.z);
+    const ax = Math.abs(tmpDir.x),
+      az = Math.abs(tmpDir.z);
     if (ax > az) return tmpDir.x > 0 ? '东 (+X)' : '西 (-X)';
     return tmpDir.z > 0 ? '南 (+Z)' : '北 (-Z)';
   }
@@ -378,6 +490,7 @@ function startGame(
   // 隐藏时跳过实际渲染以省 GPU
   const clock = new THREE.Clock();
   let physAcc = 0;
+  let elapsed = 0; // 游戏内累计秒数（云漂移用）
   let rafQueued = 0;
   let lastFrameAt = performance.now();
 
@@ -390,6 +503,7 @@ function startGame(
       requestAnimationFrame(frame);
     }
     const dt = Math.min(clock.getDelta(), 0.1);
+    elapsed += dt;
     debugPanel.tickFrame(dt);
     const hidden = document.hidden;
 
@@ -403,7 +517,10 @@ function startGame(
       }
       sky.update(dt, camera, [chunkManager.opaqueMat, chunkManager.waterMat]);
       camera.position.set(body.x, body.y + EYE_HEIGHT, body.z);
-      if (!hidden) renderer.render(scene, camera);
+      if (!hidden) {
+        renderer.clear();
+        renderer.render(scene, camera);
+      }
       return;
     }
 
@@ -411,8 +528,12 @@ function startGame(
       // 物理（固定步长子迭代）
       physAcc = Math.min(physAcc + dt, 0.12);
       const input = {
-        forward: (controls.keys.has('KeyW') ? 1 : 0) - (controls.keys.has('KeyS') ? 1 : 0),
-        strafe: (controls.keys.has('KeyD') ? 1 : 0) - (controls.keys.has('KeyA') ? 1 : 0),
+        forward:
+          (controls.keys.has('KeyW') ? 1 : 0) -
+          (controls.keys.has('KeyS') ? 1 : 0),
+        strafe:
+          (controls.keys.has('KeyD') ? 1 : 0) -
+          (controls.keys.has('KeyA') ? 1 : 0),
         jump: controls.keys.has('Space'),
         down: controls.keys.has('ShiftLeft') || controls.keys.has('ShiftRight'),
         sprint: sprinting,
@@ -438,21 +559,60 @@ function startGame(
       }
 
       updateInteraction(dt);
+      hand.update(dt, Math.hypot(body.vx, body.vz), body.onGround, attackHeld);
     }
 
     // 相机（冲刺时视野外扩，平滑过渡）
     camera.position.set(body.x, body.y + body.eyeHeight(), body.z);
     camera.rotation.set(controls.pitch, controls.yaw, 0);
-    const targetFov = sprinting && state === 'playing' && controls.locked ? SPRINT_FOV : BASE_FOV;
+    const targetFov =
+      sprinting && state === 'playing' && controls.locked
+        ? SPRINT_FOV
+        : BASE_FOV;
     if (Math.abs(camera.fov - targetFov) > 0.01) {
       camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 10);
       camera.updateProjectionMatrix();
     }
 
     // 区块流式更新（游戏中保守预算）
-    chunkManager.update(body.x, body.z, state === 'playing' ? 1 : 4, state === 'playing' ? 6 : 24);
+    chunkManager.update(
+      body.x,
+      body.z,
+      state === 'playing' ? 1 : 4,
+      state === 'playing' ? 6 : 24,
+    );
 
     sky.update(dt, camera, [chunkManager.opaqueMat, chunkManager.waterMat]);
+    clouds.update(elapsed, body.x, body.z, sky.daylight);
+
+    // 水下雾：相机没入水中 → 深蓝绿短视距雾 + 清屏色；出水恢复
+    const uw =
+      state === 'playing' &&
+      world.getBlock(
+        Math.floor(camera.position.x),
+        Math.floor(camera.position.y),
+        Math.floor(camera.position.z),
+      ) === waterId;
+    const fog = scene.fog as THREE.Fog;
+    if (uw !== underwater) {
+      underwater = uw;
+      sky.setUnderwater(uw);
+      if (uw) {
+        fog.near = 2;
+        fog.far = 24;
+      } else {
+        fog.near = fogNear0;
+        fog.far = fogFar0;
+      }
+    }
+    if (underwater) {
+      underwaterColor
+        .setHex(0x0b3a5e)
+        .multiplyScalar(0.25 + 0.75 * sky.daylight);
+      fog.color.copy(underwaterColor);
+      renderer.setClearColor(underwaterColor);
+    }
+
     particles.update(dt);
     hud.update(dt);
     debugPanel.update(dt, () =>
@@ -461,11 +621,23 @@ function startGame(
         `区块: ${Math.floor(body.x / 16)}, ${Math.floor(body.z / 16)}  朝向: ${facingText()}`,
         `已加载区块: ${chunkManager.loadedCount}  已网格化: ${chunkManager.meshedCount}  已修改: ${modifiedChunks.size}`,
         `第 ${sky.day} 天  种子: ${seedLabel}`,
-        body.flying ? '飞行中' : body.inWater ? '游泳中' : sprinting ? '冲刺中' : body.onGround ? '地面' : '空中',
+        body.flying
+          ? '飞行中'
+          : body.inWater
+            ? '游泳中'
+            : sprinting
+              ? '冲刺中'
+              : body.onGround
+                ? '地面'
+                : '空中',
       ].join('\n'),
     );
 
-    if (!hidden) renderer.render(scene, camera);
+    if (!hidden) {
+      renderer.clear();
+      renderer.render(scene, camera);
+      if (state === 'playing') hand.render(renderer);
+    }
   }
 
   frame();

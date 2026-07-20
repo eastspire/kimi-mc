@@ -25,11 +25,14 @@ export class Clouds {
     const filled = new Uint8Array(GRID * GRID);
     for (let cz = 0; cz < GRID; cz++) {
       for (let cx = 0; cx < GRID; cx++) {
-        filled[cx + cz * GRID] = noise.fbm(cx * 0.09, cz * 0.09, 3) > THRESHOLD ? 1 : 0;
+        filled[cx + cz * GRID] =
+          noise.fbm(cx * 0.09, cz * 0.09, 3) > THRESHOLD ? 1 : 0;
       }
     }
     const at = (cx: number, cz: number): number =>
-      filled[((cx % GRID) + GRID) % GRID + (((cz % GRID) + GRID) % GRID) * GRID];
+      filled[
+        (((cx % GRID) + GRID) % GRID) + (((cz % GRID) + GRID) % GRID) * GRID
+      ];
 
     // 合并几何：顶/底面恒发，侧面仅在邻格为空时发
     const positions: number[] = [];
@@ -42,19 +45,29 @@ export class Clouds {
     for (let cz = 0; cz < GRID; cz++) {
       for (let cx = 0; cx < GRID; cx++) {
         if (!at(cx, cz)) continue;
-        const x0 = cx * CELL - PERIOD / 2, x1 = x0 + CELL;
-        const z0 = cz * CELL - PERIOD / 2, z1 = z0 + CELL;
-        const y0 = 0, y1 = THICK;
+        const x0 = cx * CELL - PERIOD / 2,
+          x1 = x0 + CELL;
+        const z0 = cz * CELL - PERIOD / 2,
+          z1 = z0 + CELL;
+        const y0 = 0,
+          y1 = THICK;
         quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]); // 顶
         quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]); // 底
-        if (!at(cx + 1, cz)) quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]); // +x
-        if (!at(cx - 1, cz)) quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]); // -x
-        if (!at(cx, cz + 1)) quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]); // +z
-        if (!at(cx, cz - 1)) quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]); // -z
+        if (!at(cx + 1, cz))
+          quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]); // +x
+        if (!at(cx - 1, cz))
+          quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]); // -x
+        if (!at(cx, cz + 1))
+          quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]); // +z
+        if (!at(cx, cz - 1))
+          quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]); // -z
       }
     }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
     geo.setIndex(indices);
 
     this.mat = new THREE.MeshBasicMaterial({
@@ -63,6 +76,7 @@ export class Clouds {
       opacity: 0.7,
       fog: true,
       depthWrite: false,
+      side: THREE.DoubleSide, // 云底面要从下方可见，省去绕序烦恼
     });
     this.mesh = new THREE.Mesh(geo, this.mat);
     this.mesh.position.y = CLOUD_Y;

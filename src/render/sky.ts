@@ -2,15 +2,29 @@ import * as THREE from 'three';
 import { RENDER_DIST } from './chunk-manager';
 
 // ============================================================
-// 天空 / 昼夜循环：天空色渐变 + 雾同步 + 太阳/月亮方块
+// 天空 / 昼夜循环：天空色渐变 + 雾同步 + 太阳/月亮方块 + 星空
 // 无阴影贴图，明暗主要靠面烘焙 + 全局亮度系数
+// time 为累计秒数（不取模），day = floor(time/DAY_LENGTH)+1
 // ============================================================
 
-const DAY_LENGTH = 600; // 一昼夜（秒）
+export const DAY_LENGTH = 600; // 一昼夜（秒）
 
 const SKY_DAY = new THREE.Color(0x78a7ff);
 const SKY_NIGHT = new THREE.Color(0x06060f);
 const SKY_SUNSET = new THREE.Color(0xe8964a);
+const STAR_COUNT = 600;
+const STAR_RADIUS = 480; // < camera.far
+
+/** 确定性伪随机（星星固定图案） */
+function mulberry32(seed: number): () => number {
+  let a = seed | 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 function makeSunTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -44,12 +58,43 @@ function makeMoonTexture(): THREE.CanvasTexture {
   return t;
 }
 
+function makeStars(): { points: THREE.Points; mat: THREE.PointsMaterial } {
+  const rand = mulberry32(42);
+  const positions = new Float32Array(STAR_COUNT * 3);
+  for (let i = 0; i < STAR_COUNT; i++) {
+    // 均匀球面散布
+    const u = rand() * 2 - 1;
+    const phi = rand() * Math.PI * 2;
+    const r = Math.sqrt(1 - u * u) * STAR_RADIUS;
+    positions[i * 3] = r * Math.cos(phi);
+    positions[i * 3 + 1] = u * STAR_RADIUS;
+    positions[i * 3 + 2] = r * Math.sin(phi);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 1.6,
+    sizeAttenuation: false,
+    transparent: true,
+    opacity: 0,
+    fog: false,
+    depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  return { points, mat };
+}
+
 export class Sky {
   // 从上午开始：ang = time/DAY_LENGTH*2π - π/2，需 sin(ang) > 0 才是白天
   private time = DAY_LENGTH * 0.3;
   private skyColor = new THREE.Color();
   private sun: THREE.Mesh;
   private moon: THREE.Mesh;
+  private stars: THREE.Points;
+  private starMat: THREE.PointsMaterial;
+  private underwater = false;
   /** 全局亮度系数（0.2 夜 ~ 1.0 昼），由 main 应用到材质 */
   daylight = 1;
 
@@ -60,11 +105,14 @@ export class Sky {
     const geo = new THREE.PlaneGeometry(28, 28);
     this.sun = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: makeSunTexture(), fog: false, transparent: true }));
     this.moon = new THREE.Mesh(geo.clone(), new THREE.MeshBasicMaterial({ map: makeMoonTexture(), fog: false, transparent: true }));
-    scene.add(this.sun, this.moon);
+    const s = makeStars();
+    this.stars = s.points;
+    this.starMat = s.mat;
+    scene.add(this.sun, this.moon, this.stars);
   }
 
   update(dt: number, camera: THREE.PerspectiveCamera, tinted: THREE.Material[]): void {
-    this.time = (this.time + dt) % DAY_LENGTH;
+    this.time += dt; // 累计不取模，天数由此推出
     const ang = (this.time / DAY_LENGTH) * Math.PI * 2 - Math.PI / 2;
     const sunY = Math.sin(ang); // >0 白天
     const sunX = Math.cos(ang);
@@ -86,15 +134,23 @@ export class Sky {
       mat.color.setScalar(this.daylight);
     }
 
-    // 太阳/月亮位置（跟随相机，距离略小于雾远平面）
+    // 太阳/月亮位置（跟随相机，距离略小于雾远平面，180° 相对）
+    const vis = !this.underwater;
     const dist = RENDER_DIST * 16 * 0.9;
     const dir = new THREE.Vector3(sunX, sunY, 0.25).normalize();
     this.sun.position.copy(camera.position).addScaledVector(dir, dist);
     this.sun.lookAt(camera.position);
-    this.sun.visible = sunY > -0.15;
+    this.sun.visible = vis && sunY > -0.15;
     this.moon.position.copy(camera.position).addScaledVector(dir, -dist);
     this.moon.lookAt(camera.position);
-    this.moon.visible = sunY < 0.15;
+    this.moon.visible = vis && sunY < 0.15;
+
+    // 星星：仅夜间渐显，随时间缓慢旋转，跟随相机
+    this.stars.position.copy(camera.position);
+    this.stars.rotation.y = ang * 0.5;
+    const starOp = THREE.MathUtils.clamp(-sunY * 5, 0, 1) * 0.9;
+    this.starMat.opacity = vis ? starOp : 0;
+    this.stars.visible = this.starMat.opacity > 0.01;
   }
 
   get day(): number {
@@ -102,6 +158,21 @@ export class Sky {
   }
 
   get timeOfDay(): number {
-    return this.time / DAY_LENGTH;
+    return (this.time % DAY_LENGTH) / DAY_LENGTH;
+  }
+
+  /** 累计秒数（含天数信息），存档用 */
+  get timeValue(): number {
+    return this.time;
+  }
+
+  /** 恢复存档 / 调试：直接设定累计秒数 */
+  setTime(t: number): void {
+    this.time = Number.isFinite(t) && t >= 0 ? t : DAY_LENGTH * 0.3;
+  }
+
+  /** 水下时隐藏天体（雾由 main 切换） */
+  setUnderwater(u: boolean): void {
+    this.underwater = u;
   }
 }

@@ -24,6 +24,8 @@ export interface SaveMeta {
   seedText: string;
   player: PlayerSave;
   savedAt: number;
+  /** 昼夜累计秒数（含天数）；旧存档缺省 → 默认上午 */
+  dayTime?: number;
 }
 
 export interface LoadedSave {

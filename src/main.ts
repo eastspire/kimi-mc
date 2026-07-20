@@ -7,7 +7,9 @@ import { Persistence, type LoadedSave } from './core/persistence';
 import { WorldGen, SEA_LEVEL, parseSeedInput } from './world/worldgen';
 import { World, chunkKey } from './world/world';
 import { ChunkManager } from './render/chunk-manager';
-import { Sky } from './render/sky';
+import { Sky, DAY_LENGTH } from './render/sky';
+import { Hand } from './render/hand';
+import { Clouds } from './render/clouds';
 import { Controls } from './player/controls';
 import { PlayerBody, EYE_HEIGHT } from './player/physics';
 import { raycastVoxel, type RayHit } from './player/raycast';
@@ -106,6 +108,7 @@ function startGame(
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.autoClear = false; // 手动清屏：主场景后还要叠加手持物二次渲染
   document.getElementById('game')!.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -118,6 +121,7 @@ function startGame(
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    hand.resize(window.innerWidth, window.innerHeight);
   });
 
   // ---- 世界（存档区块覆盖到新生成的地形上） ----
@@ -131,6 +135,11 @@ function startGame(
     (cx, cz) => modifiedChunks.get(chunkKey(cx, cz)) ?? null,
   );
   const sky = new Sky(scene, renderer);
+  const clouds = new Clouds(scene, seed);
+  const hand = new Hand(chunkManager.opaqueMat);
+  hand.resize(window.innerWidth, window.innerHeight);
+  // 恢复存档昼夜（旧存档无此字段 → 保持默认上午）
+  if (save && Number.isFinite(save.meta.dayTime)) sky.setTime(save.meta.dayTime!);
   const particles = new Particles(scene);
 
   // ---- 玩家（有存档则恢复位置/视角/飞行） ----
@@ -148,6 +157,12 @@ function startGame(
 
   // 诊断钩子（控制台调试用）
   (window as unknown as { __mc: unknown }).__mc = { chunkManager, world, body };
+  // 调试验证钩子：强制昼夜（0..1 为一天内时刻）/ 传送
+  (window as unknown as { __setTime: (f: number) => void }).__setTime = (f) => sky.setTime(f * DAY_LENGTH);
+  (window as unknown as { __tp: (x: number, y: number, z: number) => void }).__tp = (x, y, z) => {
+    body.x = x; body.y = y; body.z = z;
+    body.vx = 0; body.vy = 0; body.vz = 0;
+  };
 
   // ---- UI / 音效 ----
   const hud = new Hud();

@@ -1,10 +1,14 @@
 # Minecraft Web 复刻
 
+[![Deploy to GitHub Pages](https://github.com/eastspire/kimi-mc/actions/workflows/deploy.yml/badge.svg)](https://github.com/eastspire/kimi-mc/actions/workflows/deploy.yml)
+
 非官方粉丝复刻项目，所有贴图/音效为程序生成的原创内容.
 
 使用 Vite + TypeScript + three.js 构建的体素沙盒。方块模型定义在运行时通过
 HTTP 从 `public/models/` 加载（Minecraft 风格 `parent`/`textures`/`elements` 格式），
 贴图为代码绘制的 16×16 原创像素画图集，音效为 WebAudio 实时合成。
+
+🌐 在线试玩: **https://eastspire.github.io/kimi-mc/**
 
 ## 运行
 

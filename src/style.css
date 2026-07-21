@@ -81,7 +81,9 @@ body {
 #world-map canvas {
   image-rendering: pixelated;
   border: 3px solid #2a2f3e;
-  box-shadow: 0 0 0 2px #000, 0 8px 40px rgba(0, 0, 0, 0.7);
+  box-shadow:
+    0 0 0 2px #000,
+    0 8px 40px rgba(0, 0, 0, 0.7);
   cursor: grab;
   background: #0a0c14;
 }
@@ -285,7 +287,10 @@ body {
 #overlay-progress-text {
   font-size: 14px;
   color: #cfcfcf;
-  margin-bottom: 8px;
+  margin: 0 auto 8px;
+  width: 420px;
+  max-width: 80vw;
+  text-align: left;
 }
 #overlay-bar-outer {
   width: 420px;
@@ -521,7 +526,7 @@ body {
   display: flex;
   gap: 10px;
   justify-content: center;
-  margin-top: 12px;
+  margin-bottom: 22px;
 }
 #mode-row button {
   font-size: 15px;

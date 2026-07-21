@@ -2053,18 +2053,28 @@ function startGame(
     // 加载阶段：等玩家初始 ~3×3 可见范围内 chunk 全部落地即可进入游戏，
     // 远处地形保持 lazy —— 玩家走不到永远不生（性能旁路）。
     // 进度按"出生点 ±3 chunk 已落地"计算，让玩家尽快进入。
+    // 加载阶段：按 RENDER_DIST-1 圈（最低 3）确保出生点近场，先解锁进入；
+    // 远处 RENDER_DIST 圈在游戏中流式补齐，玩家走一步就绪一格，避免
+    // 进入即触发 ensure 大量重排导致视觉卡顿。
     if (state === 'loading') {
       const cm = cur().cm;
-      // ensureRadius=3 等同"出生点 ±3 圈 (49 chunk)"——出生点近场即可玩
-      cm.update(body.x, body.z, 24, true, 0, 0, 3);
+      // loadRadius = max(3, ceil(rd/2))：rd=8→4（81 chunk）,rd=16→8（289 chunk）。
+      // 出生点近场先解锁进入，远处在游戏中随玩家移动流式补齐——既快进游戏
+      // 又避免一进入就触发 ensure 大重排（之前 rd=8 但 ensureRadius=3 仅 49 块，
+      // 进入后 rAF 立刻补 225 块导致视觉卡顿）。
+      const loadRadius = Math.max(3, Math.ceil(cm.rd / 2));
+      // loading 阶段：applyBudget=16（worker pool 8 核下：8 worker × 2 results = 16/帧 不会成瓶颈），
+      // budgetMs 留 0（不限时）—— cm.update 一次性消化所有回包，主线程 16 chunk 同步 setChunk
+      // ≈ 50ms，仍能被 rAF 16ms 间隔截断（浏览器自调度 setTimeout 让位给 paint）。
+      cm.update(body.x, body.z, 16, true, 0, 0, loadRadius);
       // 加载期地图采样节流：每帧限量消化落地高峰排队的区块,主线程不被一次性打断
-      worldMap.drainQueue(6);
-      // 出生点近场 3 圈 49 chunk 全部可见 → 视为可玩
+      worldMap.drainQueue(8);
+      // 出生点近场 (RENDER_DIST/2) 圈全部可见 → 视为可玩
       const spawnPcx = Math.floor(body.x / 16);
       const spawnPcz = Math.floor(body.z / 16);
       let allReady = true;
-      for (let dz = -3; dz <= 3 && allReady; dz++) {
-        for (let dx = -3; dx <= 3 && allReady; dx++) {
+      for (let dz = -loadRadius; dz <= loadRadius && allReady; dz++) {
+        for (let dx = -loadRadius; dx <= loadRadius && allReady; dx++) {
           if (!cm.worldHasChunk(spawnPcx + dx, spawnPcz + dz)) allReady = false;
         }
       }
@@ -2073,14 +2083,17 @@ function startGame(
         spawnReadyHandled = true;
         // 出生点就绪后立即允许进入（不必等网格完成：mesh 在 flying/player 下继续流式）
         state = 'ready';
+        // 进入游戏时 ensure 半径从"已加载的 loadRadius"起步，主循环每帧最多扩 1 圈，
+        // 避免点击"进入世界"瞬间从 ~5 圈突跳到 RD 圈（8~17）引发 200+ gen 同步卡顿
+        cur().cm.ensureRadius = loadRadius;
         startScreen.setReady(enterWorld);
       } else {
         // 给个 0~95% 假进度，仅供加载界面有动画（不再等待全视距）
-        const total = 49;
+        const total = (2 * loadRadius + 1) * (2 * loadRadius + 1);
         let done = 0;
         const w = cm.getWorldSnapshot();
-        for (let dz = -3; dz <= 3; dz++) {
-          for (let dx = -3; dx <= 3; dx++) {
+        for (let dz = -loadRadius; dz <= loadRadius; dz++) {
+          for (let dx = -loadRadius; dx <= loadRadius; dx++) {
             if (w.has(spawnPcx + dx, spawnPcz + dz)) done++;
           }
         }
@@ -2442,21 +2455,29 @@ function startGame(
 
     // 区块流式更新（游戏中保守上传预算；进度统计仅加载阶段开启）
     // 传入当前帧速度方向做前瞻排程——前进方向多 1 圈，逆方向少 1 圈。
-    // 懒加载：实际渲染距离 = RD（视觉/雾），但地形/网格生成范围 = min(RD, 3)：
-    // 玩家不去的地方永远不存、不占内存。RD 调到 ≥10 后玩家主动拉远可视范围。
+    // 游戏中 ensure 范围按"已加载 + 1 圈"平滑扩张：进游戏瞬间不会从 RD/2 突
+    // 跳到全 RD 引发 200+ gen + 1000+ queueMesh 同步卡顿。每帧最多扩 1 圈，
+    // 直到追上 RD；过冲后再清多余（避免 6x 跳变）。
     const renderRD = cur().cm.rd;
-    const ensureR = Math.min(renderRD, 3);
+    const loadedSpan = cur().cm.loadedSpan(body.x, body.z); // 当前已加载的最大半径
+    const curEnsure = cur().cm.ensureRadius;
+    const targetEnsure = Math.min(loadedSpan + 1, renderRD);
+    if (targetEnsure > curEnsure) {
+      cur().cm.ensureRadius = targetEnsure;
+    } else if (loadedSpan >= renderRD && curEnsure > renderRD) {
+      cur().cm.ensureRadius = renderRD;
+    }
     cur().cm.update(
       body.x,
       body.z,
-      state === 'playing' ? 6 : 24,
+      state === 'playing' ? 12 : 24,
       false,
       body.vx,
       body.vz,
-      ensureR,
+      cur().cm.ensureRadius,
     );
     // 游戏中继续消化排队的地图采样（玩家移动触发的新区块落地），每帧限量防尖刺
-    worldMap.drainQueue(state === 'playing' ? 2 : 8);
+    worldMap.drainQueue(state === 'playing' ? 4 : 8);
 
     sky.update(dt, camera, []);
     cur().cm.dayUniform.value = sky.daylight;

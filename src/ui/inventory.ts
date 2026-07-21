@@ -19,12 +19,13 @@ export class Inventory {
   private nameEl = document.getElementById('inv-name')!;
 
   constructor(
-    defs: BlockDef[],
+    defs: (BlockDef | null)[],
     atlasCanvas: HTMLCanvasElement,
     private cb: InventoryCallbacks,
   ) {
     const grid = document.getElementById('inv-grid')!;
     for (const def of defs) {
+      if (!def) continue;
       const slot = document.createElement('div');
       slot.className = 'hotbar-slot';
       const canvas = document.createElement('canvas');

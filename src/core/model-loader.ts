@@ -4,6 +4,8 @@
 // 可整体替换为资源包风格 JSON，字段保持一致即可
 // ============================================================
 
+import { MAX_BLOCKS } from './block-registry';
+
 export type FaceName = 'down' | 'up' | 'north' | 'south' | 'west' | 'east';
 export const FACE_NAMES: readonly FaceName[] = [
   'down',
@@ -117,7 +119,8 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 export interface LoadedBlocks {
-  defs: BlockDef[];
+  /** 按方块 id 稀疏索引（空洞为 null），mesher 与 ChunkManager 直接 defs[id] 查表 */
+  defs: (BlockDef | null)[];
   hotbar: string[];
 }
 
@@ -317,5 +320,15 @@ export async function loadBlocks(
   }
 
   defs.sort((a, b) => a.id - b.id);
-  return { defs, hotbar: file.hotbar ?? [] };
+  // 关键：mesher 与 ChunkManager 用 defs[id] 查表，必须按方块 id 索引。
+  // 方块定义按 id 升序排序后是稠密数组（index 0..N-1），但当 id 序列中有空洞
+  // （当前 blocks.json 在 id=19 处跳号）时，defs[id] 会拿到错位的方块，导致
+  // 所有 id>=20 的方块渲染时贴图错位。例如 TNT(id=32) 当时落在 defs[31]，
+  // 而 defs[32] 实际是 water_flow_1(id=33)，TNT 放置后被渲染成水。
+  // 解决：把数组重新按 id 填到 MAX_BLOCKS 大小的稀疏表，未定义的 id 位置为 null。
+  // 消费方（inventory / showMenu 等）只迭代非 null 项即可（for...of 已天然跳过 null，
+  // 因为 null 也会触发 drawBlockIcon 等调用方崩溃；需在调用处显式过滤）。
+  const byId: (BlockDef | null)[] = new Array(MAX_BLOCKS).fill(null);
+  for (const def of defs) byId[def.id] = def;
+  return { defs: byId, hotbar: file.hotbar ?? [] };
 }

@@ -128,6 +128,31 @@ export class PlayerBody {
     const loaded = this.aabbChunksLoaded(p.x, p.y, p.z);
     if (loaded && !this.boxCollides(p.x, p.y, p.z, true)) return false;
 
+    // 水中上岸 step-up：仅当玩家脚下有水（inWater 沿墙游到 sand 旁），
+    // 撞到的 solid 全在 AABB 顶部 1 格内（AABB 顶穿 sand 底），则把 feet
+    // 抬到 sand 顶（feetY = sandTop - 1.8，AABB 顶刚好跟 sand 底相切）。
+    // 这是 MC 玩家"游上 1 格高岸边"应有的行为——上不去会卡在岸边水里。
+    if (axis === 'x' || axis === 'z') {
+      const feetBlock = this.world.getBlock(
+        Math.floor(p.x),
+        Math.floor(p.y + 0.01),
+        Math.floor(p.z),
+      );
+      const inWaterNow =
+        this.world.reg.isWater(feetBlock) ||
+        this.world.reg.isWater(
+          this.world.getBlock(
+            Math.floor(p.x),
+            Math.floor(p.y + 0.4),
+            Math.floor(p.z),
+          ),
+        );
+      if (inWaterNow && this.tryWaterShoreStepUp(loaded)) {
+        // step-up 成功：把 y 抬高后重新走该 axis（已通过 boxCollides）
+        if (!this.boxCollides(p.x, p.y, p.z, true)) return false;
+      }
+    }
+
     // 逐格回退钳制
     const x0 = Math.floor(p.x - PLAYER_HALF),
       x1 = Math.floor(p.x + PLAYER_HALF - 1e-7);
@@ -161,6 +186,43 @@ export class PlayerBody {
     return hit;
   }
 
+  /**
+   * 水中岸 step-up：撞到的 solid 全在 AABB 顶 1 格内（AABB 顶穿 sand 底），
+   * 把 feet 抬到 sand 顶。返回 true 表示已修改 p.y。
+   * 仅在脚下 0.4 格内有水时被调用（避免 dry 陆地误触发）。
+   */
+  private tryWaterShoreStepUp(loaded: boolean): boolean {
+    const p = this;
+    const x0 = Math.floor(p.x - PLAYER_HALF),
+      x1 = Math.floor(p.x + PLAYER_HALF - 1e-7);
+    const y0 = Math.floor(p.y),
+      y1 = Math.floor(p.y + PLAYER_HEIGHT - 1e-7);
+    const z0 = Math.floor(p.z - PLAYER_HALF),
+      z1 = Math.floor(p.z + PLAYER_HALF - 1e-7);
+    // 收集所有撞到的 solid：必须是 AABB 顶部 1 格（即 y1 == AABB 顶 1 格），
+    // 且 AABB 底部以下没撞（避免把玩家从 1 格高洞里推上去）。
+    let stepUpTop = -Infinity;
+    let onlyTopHit = true;
+    for (let by = y0; by <= y1; by++) {
+      for (let bz = z0; bz <= z1; bz++) {
+        for (let bx = x0; bx <= x1; bx++) {
+          if (!this.solidAt(bx, by, bz, loaded)) continue;
+          const top = by + 1;
+          if (top > stepUpTop) stepUpTop = top;
+          // 撞到的 solid 必须在 AABB 顶部 1 格内（即 top == y1 + 1 = AABB 顶）
+          if (top < y1 + 1 - 1e-6) onlyTopHit = false;
+        }
+      }
+    }
+    if (!onlyTopHit || stepUpTop === -Infinity) return false;
+    // 把 feet 抬到 stepUpTop - 1.8（顶刚好跟 sand 底相切）
+    const newY = stepUpTop - 1.8;
+    // 限制不能"跳高超过 1 格"，避免从 1 格高洞被弹飞
+    if (newY - p.y > 1.0) return false;
+    if (newY <= p.y - 0.05) return false; // 不能往下
+    p.y = newY;
+    return true;
+  }
   step(input: MoveInput, dt: number): void {
     this.collidedX = false;
     this.collidedZ = false;
@@ -207,7 +269,12 @@ export class PlayerBody {
         (input.down ? -FLY_SPEED * 0.9 : 0);
     } else if (this.inWater) {
       this.vy -= WATER_GRAVITY * dt;
-      if (input.jump) this.vy = Math.min(this.vy + 28 * dt, WATER_SWIM_UP);
+      if (input.jump) {
+        // 浅水（feet 浸水但 head 已出水）可 jump 出 sand；深水（head 仍浸）只能 swim up。
+        // MC 行为：哪怕 onGround=false 也能跳（双脚已踩水底）。
+        if (!this.headInWater) this.vy = JUMP_VEL;
+        else this.vy = Math.min(this.vy + 28 * dt, WATER_SWIM_UP);
+      }
       if (this.vy < WATER_SINK_MAX) this.vy = WATER_SINK_MAX;
     } else {
       this.vy -= GRAVITY * dt;

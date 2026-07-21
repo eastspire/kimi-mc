@@ -106,6 +106,8 @@ export class ChunkManager {
   public rd = RENDER_DIST;
   /** 平滑光照（AO）开关，新 Worker 初始化时同步 */
   private aoFlag = true;
+  /** 当前帧 ensure 半径（由主循环按"已加载+1 圈"平滑扩张，避免进入游戏瞬间突跳大范围） */
+  public ensureRadius = RENDER_DIST;
 
   /** 运行时调整渲染距离（2~32），下一帧 ensure 立即按新半径加载/卸载 */
   setRenderDist(r: number): void {
@@ -169,9 +171,10 @@ export class ChunkManager {
   /** 首次 update() 时创建 Worker 池（幂等） */
   private ensureWorkers(): void {
     if (this.workers.length > 0) return;
+    // 用全部硬件核（不 -1 保留主线程），gen 任务重 CPU 大量平行可分给多核
     const count = Math.max(
       2,
-      Math.min(4, (navigator.hardwareConcurrency || 4) - 1),
+      Math.min(8, navigator.hardwareConcurrency || 4),
     );
     for (let i = 0; i < count; i++) {
       const w = this.spawnWorker();
@@ -483,6 +486,8 @@ export class ChunkManager {
     lookaheadVX = 0,
     lookaheadVZ = 0,
     ensureRadius?: number,
+    /** 时间预算 ms：超过则停止本帧 apply，让位给 rAF/UI 刷新；<=0 不限 */
+    budgetMs = 0,
   ): number {
     this.ensureWorkers();
     this.ensure(px, pz, lookaheadVX, lookaheadVZ, ensureRadius);
@@ -524,11 +529,17 @@ export class ChunkManager {
 
     // 2) 应用结果：生成 + 网格 共用 applyBudget，但村庄/要塞/torch 重区每块
     // setChunk 触发 lighting BFS 与 8K 邻区扫描，4 workers 同帧回包在 playing 阶段
-    // 会瞬间堆积成 50ms+ 卡顿。loading 阶段 applyBudget=24，可全速；playing 阶段
-    // 收紧为同帧 ≤6 块（避免帧 spike）。
+    // 会瞬间堆积成 50ms+ 卡顿。playing 阶段收紧为同帧 ≤6 块（避免帧 spike）；
+    // loading 阶段再叠 budgetMs 时间预算（>0 时每块 check now，超则停），
+    // 把长任务拆碎让 rAF/setProgress/按钮能 fire，UI 视图不卡。
+    const budgetStart = budgetMs > 0 ? performance.now() : 0;
     let applied = 0;
     let i = 0;
-    while (i < this.results.length && applied < applyBudget) {
+    while (
+      i < this.results.length &&
+      applied < applyBudget &&
+      (budgetMs <= 0 || performance.now() - budgetStart < budgetMs)
+    ) {
       const r = this.results[i];
       if (r.type === 'gen') {
         this.results.splice(i, 1);
@@ -644,6 +655,36 @@ export class ChunkManager {
 
   get loadedCount(): number {
     return this.world.chunks.size;
+  }
+
+  /**
+   * 当前已加载区块相对玩家的"半径"——以 spawn 中心为原点，
+   * 量最大曼哈顿距离 R 表示 [pcx-R..pcx+R, pcz-R..pcz+R] 全覆盖。
+   * 用 player 当前位置作中心：返回 R 表示 ±R 圈所有 chunk 都在 chunks Map 里。
+   * 主循环用此值平滑扩张 ensure 半径。
+   */
+  loadedSpan(px: number, pz: number): number {
+    const pcx = Math.floor(px / 16);
+    const pcz = Math.floor(pz / 16);
+    // 上限用 rd 防止 RD slider 误调大时扫到天边
+    const max = Math.max(this.rd + 2, 4);
+    let r = 0;
+    while (r < max) {
+      const next = r + 1;
+      let missing = false;
+      for (let dz = -next; dz <= next && !missing; dz++) {
+        for (let dx = -next; dx <= next; dx++) {
+          if (Math.abs(dx) !== next && Math.abs(dz) !== next) continue; // 只查新一圈外缘
+          if (!this.world.hasChunk(pcx + dx, pcz + dz)) {
+            missing = true;
+            break;
+          }
+        }
+      }
+      if (missing) break;
+      r = next;
+    }
+    return r;
   }
 
   get meshedCount(): number {

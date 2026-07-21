@@ -15,8 +15,9 @@ export class BlockRegistry {
   /** 水位等级 0..8 → 对应方块 id（无该等级则 -1）；供流体模拟与渲染查表 */
   readonly waterByLevel: number[] = new Array<number>(9).fill(-1);
 
-  constructor(defs: BlockDef[], hotbarNames: string[]) {
+  constructor(defs: (BlockDef | null)[], hotbarNames: string[]) {
     for (const def of defs) {
+      if (!def) continue;
       if (def.id < 0 || def.id >= MAX_BLOCKS) throw new Error(`方块 id 越界：${def.name} (${def.id})`);
       if (this.byId[def.id]) throw new Error(`方块 id 冲突：${def.name} (${def.id})`);
       this.byId[def.id] = def;

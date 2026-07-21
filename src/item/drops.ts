@@ -8,7 +8,7 @@ import type { ToolDef } from './tools';
 // ============================================================
 // 掉落物：地面旋转浮动的物品实体（MC item entity）
 //  - 食物：交叉双面片；方块：0.34 倍微缩 3D 模型（复用网格化慢路径）
-//  - 抛出小抛物线 → 落地后原地旋转 + 上下浮动
+//  - 抛出小抛物线 → 落地后贴地（HOVER=0.0625）旋转 + 上下小幅浮动
 //  - 0.5s 拾取延迟，1.35 格拾取半径，300s 消失（MC 一致）
 // ============================================================
 
@@ -16,7 +16,7 @@ const GRAVITY = 16;
 const PICKUP_DELAY = 0.5;
 const PICKUP_DIST = 1.35;
 const LIFETIME = 300;
-const HOVER = 0.28;
+const HOVER = 0.0625;
 
 export type DropItem =
   | { kind: 'food'; def: FoodDef; n: number }
@@ -179,7 +179,7 @@ export class DropManager {
         }
       }
 
-      // 物理：抛物线 → 落地静止
+      // 物理：抛物线 → 落地贴地（HOVER 是 MC 物品实体离地高度）
       if (!d.grounded) {
         d.vy -= GRAVITY * dt;
         if (d.vy < -30) d.vy = -30;
@@ -202,8 +202,8 @@ export class DropManager {
         }
       }
 
-      // 呈现：旋转 + 上下浮动（MC 物品实体姿态）
-      d.group.position.set(d.x, d.y + Math.sin(d.age * 2.2) * 0.07, d.z);
+      // 呈现：落地后贴地旋转 + 上下小幅浮动（±0.05，避免看起来"悬浮"）
+      d.group.position.set(d.x, d.y + Math.sin(d.age * 2.2) * 0.05, d.z);
       d.group.rotation.y = d.age * 1.4;
     }
   }

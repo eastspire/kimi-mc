@@ -424,23 +424,70 @@ const paintGlass: Painter = (ctx, _ox, _oy, _rnd) => {
 };
 
 const paintCobblestone: Painter = (ctx, _ox, _oy, rnd) => {
-  speckle(ctx, rnd, '#7a7a7a', ['#6f6f6f', '#858585', '#676767'], 0.4);
-  // 错位石块轮廓 + 高光
-  for (let i = 0; i < 6; i++) {
-    const bx = 1 + ((rnd() * 11) | 0),
-      by = 1 + ((rnd() * 11) | 0);
-    const w = 3 + ((rnd() * 3) | 0),
-      h = 2 + ((rnd() * 3) | 0);
-    for (let x = 0; x < w; x++) {
-      px(ctx, Math.min(15, bx + x), by, '#565656');
-      px(ctx, Math.min(15, bx + x), Math.min(15, by + h), '#565656');
+  // MC 风格圆石：大小不一的饱满石块 + 粗深缝 + 强立体明暗。
+  // 观感要点（对比旧版随机空心方框的乱线，以及扁平规则网格）：
+  //  - 石块大而不规则（宽高随机、四角随机咬缺），不是死板方格
+  //  - 缝隙粗且深（约 2px 深灰），让石块一颗颗"嵌"进去
+  //  - 明暗对比强：顶部亮边、底部浓影，中部基色带噪点
+  //  - 平铺方向用错缝排布 + 跨格延展，弱化石块边界的网格感
+  ctx.fillStyle = '#3f3f3f'; // 粗深缝底色（贯穿全局）
+  ctx.fillRect(0, 0, 16, 16);
+
+  // 一颗石块：在 (cx,cy,w,h) 区域画饱满石头，左上受光、右下投影，四角随机咬缺
+  const stone = (
+    cx: number,
+    cy: number,
+    w: number,
+    h: number,
+    tone: number,
+  ): void => {
+    const base = 110 + tone;
+    const hi = Math.min(200, base + 34);
+    const lo = Math.max(40, base - 30);
+    const cB = `rgb(${base},${base},${base})`;
+    const cH = `rgb(${hi},${hi},${hi})`;
+    const cL = `rgb(${lo},${lo},${lo})`;
+    // 四角咬缺深度（随机 1~2），制造不规则圆角
+    const bite = [
+      1 + ((rnd() * 2) | 0),
+      1 + ((rnd() * 2) | 0),
+      1 + ((rnd() * 2) | 0),
+      1 + ((rnd() * 2) | 0),
+    ];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // 咬角判断：离每个角的曼哈顿距离小于咬深则留缝
+        const dTL = x + y;
+        const dTR = (w - 1 - x) + y;
+        const dBL = x + (h - 1 - y);
+        const dBR = (w - 1 - x) + (h - 1 - y);
+        if (dTL < bite[0] || dTR < bite[1] || dBL < bite[2] || dBR < bite[3])
+          continue;
+        const gx = cx + x;
+        const gy = cy + y;
+        if (gx > 15 || gy > 15) continue;
+        // 顶部一行 + 左缘受光；底部一行 + 右缘投影；中部基色带噪
+        if (y === 0) px(ctx, gx, gy, cH);
+        else if (y === h - 1) px(ctx, gx, gy, cL);
+        else if (x === 0) px(ctx, gx, gy, cH);
+        else if (x === w - 1) px(ctx, gx, gy, cL);
+        else px(ctx, gx, gy, rnd() < 0.22 ? cL : cB);
+      }
     }
-    for (let y = 0; y <= h; y++) {
-      px(ctx, bx, Math.min(15, by + y), '#565656');
-      px(ctx, Math.min(15, bx + w), Math.min(15, by + y), '#565656');
-    }
-    px(ctx, Math.min(15, bx + 1), Math.min(15, by + 1), '#8c8c8c');
-  }
+  };
+
+  // 错缝紧密布局：两行三列交错，块体大、缝隙仅 1px，排列饱满不空
+  // 第一行（y≈1）
+  stone(1, 1, 5, 6, -6);
+  stone(6, 1, 5, 6, 5);
+  stone(11, 1, 4, 6, -3);
+  // 第二行（y≈8，x 错开半块）
+  stone(1, 8, 4, 6, 3);
+  stone(5, 8, 5, 6, -5);
+  stone(10, 8, 5, 6, 6);
+  // 整体少量杂点融入手工感
+  for (let i = 0; i < 8; i++)
+    px(ctx, (rnd() * 16) | 0, (rnd() * 16) | 0, rnd() < 0.5 ? '#565656' : '#7d7d7d');
 };
 
 const paintGravel: Painter = (ctx, _ox, _oy, rnd) => {

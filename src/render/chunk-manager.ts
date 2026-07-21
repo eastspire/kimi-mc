@@ -509,24 +509,13 @@ export class ChunkManager {
     this.ensure(px, pz, lookaheadVX, lookaheadVZ, ensureRadius);
     const now = performance.now();
 
-    // 1) 地形生成：存档覆盖直接落地，其余派发给空闲 Worker
-    while (this.idle.length > 0 && this.genQueue.length > 0) {
-      const job = this.genQueue.shift()!;
-      const key = chunkKey(job.cx, job.cz);
-      this.genSet.delete(key);
-      if (this.world.hasChunk(job.cx, job.cz) || this.genInFlight.has(key))
-        continue;
-      const saved = this.provide?.(job.cx, job.cz) ?? null;
-      if (saved) {
-        this.settleGen(job.cx, job.cz, saved);
-        continue;
-      }
-      const w = this.idle.pop()!;
-      this.genInFlight.set(key, { worker: w, since: now });
-      w.postMessage({ type: 'gen', cx: job.cx, cz: job.cz });
-    }
+    // 派发顺序（关键：网格优先于生成）：
+    // 玩家看得见的网格（已生成待网格化）永远比看不见的远处地形生成更紧迫。
+    // 若先派生成，rd 大/快速移动时 genQueue 永远满、占满全部 Worker，
+    // 网格任务被饿死 → 区块数据生成了但没网格，玩家眼前出现"区块不渲染"的空洞。
+    // 故本帧流程：回收卡死 → 应用结果 → 先派网格 → 剩余 Worker 才派生成。
 
-    // 1.5) 回收卡死任务：在飞超过 10s 视为丢失，重新排队（Worker 静默异常的兜底）
+    // 1) 回收卡死任务：在飞超过 10s 视为丢失，重新排队（Worker 静默异常的兜底）
     for (const [key, info] of [...this.inFlight]) {
       if (now - info.since > 10_000) {
         this.inFlight.delete(key);
@@ -634,6 +623,24 @@ export class ChunkManager {
           light ? [data, light] : [data],
         );
       }
+    }
+
+    // 3.5) 地形生成：仅用网格派发后剩余的 Worker。
+    // 网格已先抢走它需要的 Worker，这里用剩下的派发生成——保证可见网格永不被饿死。
+    while (this.idle.length > 0 && this.genQueue.length > 0) {
+      const job = this.genQueue.shift()!;
+      const key = chunkKey(job.cx, job.cz);
+      this.genSet.delete(key);
+      if (this.world.hasChunk(job.cx, job.cz) || this.genInFlight.has(key))
+        continue;
+      const saved = this.provide?.(job.cx, job.cz) ?? null;
+      if (saved) {
+        this.settleGen(job.cx, job.cz, saved);
+        continue;
+      }
+      const w = this.idle.pop()!;
+      this.genInFlight.set(key, { worker: w, since: now });
+      w.postMessage({ type: 'gen', cx: job.cx, cz: job.cz });
     }
 
     // 4) 加载进度（仅启动阶段统计）。节流:每 ~100ms 才重扫一遍槽位,

@@ -24,10 +24,23 @@ const DIRS: readonly (readonly [number, number, number])[] = [
   [0, 0, -1],
 ];
 
+// 预编译的遮挡查表：id → 是否挡光（避免每次迭代 getBlock→byId→读字段三层解引用）
+let occlTable: Uint8Array | null = null;
+let occlReg: WorldView['reg'] | null = null;
+function occludesFast(w: WorldView, id: number): boolean {
+  if (id <= 0) return false;
+  if (occlReg !== w.reg) {
+    occlReg = w.reg;
+    occlTable = new Uint8Array(w.reg.byId.length);
+    for (let i = 0; i < w.reg.byId.length; i++) {
+      occlTable[i] = w.reg.byId[i]?.occludes ? 1 : 0;
+    }
+  }
+  return id < occlTable!.length ? occlTable![id] === 1 : false;
+}
+
 function occludes(w: WorldView, x: number, y: number, z: number): boolean {
-  const id = w.getBlock(x, y, z);
-  const d = id > 0 ? w.reg.byId[id] : null;
-  return !!d && d.occludes;
+  return occludesFast(w, w.getBlock(x, y, z));
 }
 
 // 4 路并行的 typed-array BFS 队列（不分配，按需扩容并复用 head/tail）
@@ -65,10 +78,11 @@ class LightQueue {
       return;
     }
     const cap = this.qx.length;
-    const nx = new Float64Array(cap << 1);
-    const ny = new Int16Array(cap << 1);
-    const nz = new Float64Array(cap << 1);
-    const nl = new Uint8Array(cap << 1);
+    const nCap = cap * 2; // 用乘法而非 <<1，避免 cap > 2^30 时符号溢出
+    const nx = new Float64Array(nCap);
+    const ny = new Int16Array(nCap);
+    const nz = new Float64Array(nCap);
+    const nl = new Uint8Array(nCap);
     const len = this.tail - this.head;
     nx.set(this.qx.subarray(this.head, this.tail));
     ny.set(this.qy.subarray(this.head, this.tail));
@@ -104,6 +118,33 @@ export function addLight(
   q.reset();
   w.setLight(x, y, z, level);
   q.push(x, y, z, level);
+  bfs(w, q);
+}
+
+/**
+ * 区块落地批量播种：把该区块全部光源一次性入队，单次 BFS 泛洪。
+ * 相比逐光源调 addLight：重叠泛洪区域只走一遍（强光源自然压制弱光源），
+ * 且每格迭代用查表 occlusion，省掉 N 次函数调用 + 重复 byId 解引用。
+ * 村庄/要塞区数百火把时，主线程耗时可降一个数量级。
+ */
+export function seedLights(
+  w: WorldView,
+  sources: ArrayLike<number>,
+): void {
+  const q = SHARED_Q;
+  q.reset();
+  // sources 为扁平 [x,y,z,level, ...]
+  for (let i = 0; i + 3 < sources.length; i += 4) {
+    const x = sources[i], y = sources[i + 1], z = sources[i + 2], l = sources[i + 3];
+    if (l <= 0) continue;
+    w.setLight(x, y, z, l);
+    q.push(x, y, z, l);
+  }
+  bfs(w, q);
+}
+
+/** BFS 主循环（addLight 与 seedLights 共用）：逐格查表 occlusion + 衰减扩散 */
+function bfs(w: WorldView, q: LightQueue): void {
   while (q.head < q.tail) {
     const cx = q.qx[q.head],
       cy = q.qy[q.head],
@@ -117,9 +158,11 @@ export function addLight(
         ny = cy + dy,
         nz = cz + dz;
       if (ny < 0 || ny >= 128) continue;
-      if (occludes(w, nx, ny, nz)) continue;
+      if (occludesFast(w, w.getBlock(nx, ny, nz))) continue;
       if (w.getLight(nx, ny, nz) >= next) continue;
-      w.setLight(nx, ny, nz, next);
+      // setLight 返回 false = 未加载/越界：不写入也不入队。
+      // 关键：阻止泛洪越过加载边界在虚空里无限扩散（会把共享队列撑爆 OOM）。
+      if (!w.setLight(nx, ny, nz, next)) continue;
       q.push(nx, ny, nz, next);
     }
   }

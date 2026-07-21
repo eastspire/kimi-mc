@@ -290,12 +290,8 @@ export class ChunkManager {
     this.deferred.clear();
   }
 
-  /** 从任意 16×128×16 布局的 Map 组装 18×128×18 带邻边数据（逐列拷贝，未加载邻区留 0） */
-  private buildPaddedFrom(
-    src: ReadonlyMap<string, Uint8Array>,
-    cx: number,
-    cz: number,
-  ): ArrayBuffer {
+  /** 组装 18×128×18 带邻边方块数据（热路径：整数键查表，无字符串分配） */
+  private buildPadded(cx: number, cz: number): ArrayBuffer {
     const out = new Uint8Array(PAD_X * H * PAD_Z);
     for (let lz = -1; lz <= 16; lz++) {
       for (let lx = -1; lx <= 16; lx++) {
@@ -303,7 +299,7 @@ export class ChunkManager {
         const wz = cz * 16 + lz;
         const ccx = Math.floor(wx / 16);
         const ccz = Math.floor(wz / 16);
-        const chunk = src.get(chunkKey(ccx, ccz));
+        const chunk = this.world.chunkAt(ccx, ccz);
         if (!chunk) continue;
         let s = wx - ccx * 16 + 16 * (wz - ccz * 16);
         let d = lx + 1 + PAD_X * (lz + 1);
@@ -317,15 +313,28 @@ export class ChunkManager {
     return out.buffer;
   }
 
-  /** 组装 18×128×18 带邻边方块数据 */
-  private buildPadded(cx: number, cz: number): ArrayBuffer {
-    return this.buildPaddedFrom(this.world.chunks, cx, cz);
-  }
-
   /** 组装 18×128×18 带邻边光照数据；3×3 邻域无光时返回 null（零开销快路径） */
   private buildPaddedLight(cx: number, cz: number): ArrayBuffer | null {
     if (!this.world.hasLightNear(cx, cz)) return null;
-    return this.buildPaddedFrom(this.world.light, cx, cz);
+    const out = new Uint8Array(PAD_X * H * PAD_Z);
+    for (let lz = -1; lz <= 16; lz++) {
+      for (let lx = -1; lx <= 16; lx++) {
+        const wx = cx * 16 + lx;
+        const wz = cz * 16 + lz;
+        const ccx = Math.floor(wx / 16);
+        const ccz = Math.floor(wz / 16);
+        const chunk = this.world.lightAt(ccx, ccz);
+        if (!chunk) continue;
+        let s = wx - ccx * 16 + 16 * (wz - ccz * 16);
+        let d = lx + 1 + PAD_X * (lz + 1);
+        for (let y = 0; y < H; y++) {
+          out[d] = chunk[s];
+          s += 256;
+          d += PAD_X * PAD_Z;
+        }
+      }
+    }
+    return out.buffer;
   }
 
   /**
@@ -398,18 +407,25 @@ export class ChunkManager {
     if (queued > 0) this.genQueue.sort((a, b) => a.d2 - b.d2);
 
     // 卸载视距外（无方向性，玩家离开方向立即释放）
-    // 仅 +1 缓冲（不再 +2），地形差一格无视觉影响但显著降低内存峰值
+    // 仅 +1 缓冲（不再 +2），地形差一格无视觉影响但显著降低内存峰值。
+    // 用整数键迭代（forEachChunkFast），避免每帧对全部区块做字符串 split/parse。
     const lim = R + 1;
-    for (const key of [...this.world.chunks.keys()]) {
-      const [cx, cz] = key.split(',').map(Number);
+    const toUnload: number[] = [];
+    this.world.forEachChunkFast((cx, cz) => {
       if (Math.abs(cx - pcx) > lim || Math.abs(cz - pcz) > lim) {
-        this.world.deleteChunk(cx, cz);
-        this.genSet.delete(key);
-        this.waiting.delete(key);
-        this.versions.delete(key); // 防版本表无限增长
-        this.disposeMeshes(key);
-        this.onChunkUnloaded?.(cx, cz);
+        toUnload.push(cx, cz);
       }
+    });
+    for (let i = 0; i + 1 < toUnload.length; i += 2) {
+      const cx = toUnload[i];
+      const cz = toUnload[i + 1];
+      const key = chunkKey(cx, cz);
+      this.world.deleteChunk(cx, cz);
+      this.genSet.delete(key);
+      this.waiting.delete(key);
+      this.versions.delete(key); // 防版本表无限增长
+      this.disposeMeshes(key);
+      this.onChunkUnloaded?.(cx, cz);
     }
   }
 

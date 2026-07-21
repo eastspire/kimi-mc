@@ -1,6 +1,6 @@
 import { BlockRegistry, AIR } from '../core/block-registry';
 import { CHUNK_X, CHUNK_Y, CHUNK_Z } from './chunk-const';
-import { addLight, onBlockLightChanged } from './lighting';
+import { addLight, onBlockLightChanged, seedLights } from './lighting';
 
 // ============================================================
 // 世界存储：Map<"cx,cz", Uint8Array>，方块编辑即标记脏区块
@@ -51,6 +51,19 @@ export class World {
     return this.chunksFast.get(packKey(cx, cz)) ?? null;
   }
 
+  /** 按预解算 (cx,cz) 取光照数组（热路径，无字符串分配） */
+  lightAt(cx: number, cz: number): Uint8Array | null {
+    return this.lightFast.get(packKey(cx, cz)) ?? null;
+  }
+
+  /** 整数键迭代（卸载扫描用）：对每个已加载区块回调 (cx, cz)。
+   *  遍历 chunksFast 整数键，避免 ensure 每帧 split/parse 字符串键。 */
+  forEachChunkFast(cb: (cx: number, cz: number) => void): void {
+    for (const fkey of this.chunksFast.keys()) {
+      cb(((fkey >> 16) & 0xffff) - 32768, (fkey & 0xffff) - 32768);
+    }
+  }
+
   setChunk(cx: number, cz: number, data: Uint8Array): void {
     const key = chunkKey(cx, cz);
     const fkey = packKey(cx, cz);
@@ -61,16 +74,20 @@ export class World {
     this.lightCount.set(key, 0);
 
     // 1) 区块内光源播种（自然地形无光源；读档的修改区块可能含荧石）
+    // 收集到扁平数组后单次批量 BFS（seedLights），重叠泛洪只走一遍，
+    // 远比逐光源 addLight 高效——村庄/要塞区数百火把时是加载期主要提速点。
+    const sources: number[] = [];
     for (let y = 0; y < CHUNK_Y; y++) {
       for (let lz = 0; lz < CHUNK_Z; lz++) {
         for (let lx = 0; lx < CHUNK_X; lx++) {
           const id = data[lidx(lx, y, lz)];
           const lum = id > 0 ? (this.reg.byId[id]?.luminance ?? 0) : 0;
           if (lum > 0)
-            addLight(this, cx * CHUNK_X + lx, y, cz * CHUNK_Z + lz, lum);
+            sources.push(cx * CHUNK_X + lx, y, cz * CHUNK_Z + lz, lum);
         }
       }
     }
+    if (sources.length > 0) seedLights(this, sources);
 
     // 2) 邻区边缘光回流：邻区边缘格光 ≥2 则向本区块泛洪
     // 优化：先看邻区 lightCount，0 → 完全无光 → 8K 扫描跳过；非 0 才逐格扫边

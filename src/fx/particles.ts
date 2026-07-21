@@ -13,6 +13,8 @@ export class Particles {
   private velocities = new Float32Array(MAX * 3);
   private life = new Float32Array(MAX);
   private head = 0;
+  /** 当前活跃粒子数；0 时 update 直接短路，省每帧 1024 次扫描 */
+  private live = 0;
 
   constructor(scene: THREE.Scene) {
     const geo = new THREE.BufferGeometry();
@@ -34,6 +36,7 @@ export class Particles {
     for (let i = 0; i < count; i++) {
       const idx = this.head;
       this.head = (this.head + 1) % MAX;
+      if (this.life[idx] <= 0) this.live++; // 覆写活粒子则总数不变，占用死槽才 +count
       this.positions[idx * 3] = x + (Math.random() - 0.5) * 0.7;
       this.positions[idx * 3 + 1] = y + (Math.random() - 0.5) * 0.7;
       this.positions[idx * 3 + 2] = z + (Math.random() - 0.5) * 0.7;
@@ -50,6 +53,7 @@ export class Particles {
   }
 
   update(dt: number): void {
+    if (this.live <= 0) return; // 无活跃粒子：跳过 1024 格全扫
     let any = false;
     for (let i = 0; i < MAX; i++) {
       if (this.life[i] <= 0) continue;
@@ -57,6 +61,7 @@ export class Particles {
       this.life[i] -= dt;
       if (this.life[i] <= 0) {
         this.positions[i * 3 + 1] = -10000;
+        this.live--;
         continue;
       }
       this.velocities[i * 3 + 1] -= 18 * dt;

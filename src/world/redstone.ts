@@ -96,6 +96,12 @@ export class RedstoneSimulator {
   }
 
   update(dt: number): void {
+    // 空转快速短路：无脉冲且无待算区域时只累计节拍，不建任何迭代器
+    if (this.pulses.size === 0 && this.pending.size === 0) {
+      this.acc += dt;
+      if (this.acc >= TICK) this.acc = 0;
+      return;
+    }
     // 推进按钮脉冲
     for (const [k, t] of this.pulses) {
       const nt = t - dt;
